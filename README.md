@@ -59,7 +59,7 @@ omarchy bar move terminal.tetris --section left
 
 ## Why this is safe
 
-`omarchy plugin add` only clones the git repo. It does not run install scripts or ask for sudo.
+`omarchy plugin add` only clones the git repo. It does not run install scripts or request elevated privileges.
 
 The game is Python 3 and the standard library. It does not open the network. It reads the current theme colors, writes scores and the sound setting under your home directory, and plays short local WAV files with `pw-play`. The bar widget launches that script in a terminal. Plugins stay off until you enable them.
 
