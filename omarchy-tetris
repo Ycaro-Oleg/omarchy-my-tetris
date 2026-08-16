@@ -258,14 +258,17 @@ def paint_mino(
         put(x + 1, y, " ", theme.fg, face)
         return
     if style == "brick":
+        # Same tile on every mino: colour in the top-left, grout on the
+        # bottom and the right. Stacked pieces (O, T stem) split both ways
+        # without a black underline.
         if ghost:
             dust = mix(color, theme.well, 0.28)
-            put(x, y, "▒", dust, theme.well)
-            put(x + 1, y, "▒", dust, theme.well)
+            put(x, y, "▀", dust, theme.grout)
+            put(x + 1, y, "▘", dust, theme.grout)
             return
         face = mix((255, 255, 255), color, 0.16)
-        put(x, y, "█", face, theme.grout)
-        put(x + 1, y, "▌", color, theme.grout)
+        put(x, y, "▀", face, theme.grout)
+        put(x + 1, y, "▘", color, theme.grout)
         return
     if style == "blocks":
         face = mix(color, theme.well, 0.35) if ghost else color
