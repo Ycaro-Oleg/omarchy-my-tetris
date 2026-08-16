@@ -18,7 +18,7 @@ That clones the repo into `~/.config/omarchy/plugins/terminal.tetris/`. Click th
 
 ## Usage
 
-Left click the bar icon for the panel. Right click starts a game. Escape closes the panel. `omarchy-shell shell summon terminal.tetris` opens it the same way. Super+Space lists the desktop launcher (the tetromino icon). Remove the bar icon from the panel with **Remove from bar**; press `i` on the game menu to put it back.
+Left click the bar icon for the panel. Right click starts a game. Escape closes the panel. `omarchy-shell shell summon terminal.tetris` opens it the same way. Super+Space lists the desktop launcher (the tetromino icon). **Remove from bar** is under Play in the panel. On the game menu, `i` takes the icon off the bar and `u` puts it back.
 
 | Mode | Goal |
 |---|---|
@@ -37,7 +37,8 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | n | Next landing sound |
 | t | Next music theme |
 | b / ← → | Next mino look (arrows on the menu) |
-| i | Put the Tetris icon on the bar |
+| i | Remove the Tetris icon from the bar |
+| u | Put the Tetris icon on the bar |
 | m | Mute music only |
 | [ ] | Game volume |
 | - = | Music volume |

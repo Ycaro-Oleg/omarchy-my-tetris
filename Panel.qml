@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -149,7 +150,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(320))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(560))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -159,10 +160,21 @@ Panel {
       Keys.onReturnPressed: root.play()
       Keys.onEnterPressed: root.play()
 
-      Column {
-        id: content
-        width: parent.width
-        spacing: Style.space(10)
+      Flickable {
+        id: panelFlick
+        anchors.fill: parent
+        contentWidth: width
+        contentHeight: content.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        interactive: contentHeight > height
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        Column {
+          id: content
+          width: panelFlick.width
+          spacing: Style.space(10)
 
         PanelHero {
           title: "Tetris"
@@ -184,6 +196,14 @@ Panel {
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
           onClicked: root.play()
+        }
+
+        Button {
+          width: parent.width
+          text: "Remove from bar"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.removeFromBar()
         }
 
         PanelSeparator { foreground: root.contentForeground }
@@ -302,15 +322,6 @@ Panel {
             root.persist()
           }
         }
-
-        PanelSeparator { foreground: root.contentForeground }
-
-        Button {
-          width: parent.width
-          text: "Remove from bar"
-          foreground: root.contentForeground
-          fontFamily: root.contentFontFamily
-          onClicked: root.removeFromBar()
         }
       }
     }
