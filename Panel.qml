@@ -190,20 +190,27 @@ Panel {
           }
         }
 
+        PanelSectionHeader {
+          text: "Bar"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+        }
+
+        Button {
+          width: parent.width
+          text: "Remove from bar"
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.removeFromBar()
+        }
+
         Button {
           width: parent.width
           text: "Play"
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
           onClicked: root.play()
-        }
-
-        Button {
-          width: parent.width
-          text: "Remove from bar"
-          foreground: root.contentForeground
-          fontFamily: root.contentFontFamily
-          onClicked: root.removeFromBar()
         }
 
         PanelSeparator { foreground: root.contentForeground }

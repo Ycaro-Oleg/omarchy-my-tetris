@@ -70,7 +70,7 @@ BarWidget {
     iconComponent: Component {
       TetrisMark {
         anchors.fill: parent
-        foreground: button.foreground
+        foreground: button.bar ? button.bar.barForeground : button.foreground
       }
     }
     onPressed: function(buttonCode) {
