@@ -21,6 +21,7 @@ from typing import Optional
 
 COLS = 10
 ROWS = 20
+HIDDEN = 4
 CELL = 2
 TICK = 1.0 / 30.0
 LOCK_MS = 500
@@ -202,10 +203,6 @@ class Theme:
         return mix(self.rgb("lighter_background"), self.rgb("dark_background"), 0.22)
 
     @property
-    def grout(self) -> tuple[int, int, int]:
-        return mix((0, 0, 0), self.well, 0.88)
-
-    @property
     def fg(self) -> tuple[int, int, int]:
         return self.rgb("foreground")
 
@@ -275,29 +272,42 @@ class Piece:
 
 class Board:
     def __init__(self) -> None:
-        self.grid: list[list[Optional[str]]] = [[None] * COLS for _ in range(ROWS)]
+        self.grid: list[list[Optional[str]]] = [[None] * COLS for _ in range(HIDDEN + ROWS)]
+
+    def _row(self, y: int) -> int:
+        return y + HIDDEN
 
     def inside(self, x: int, y: int) -> bool:
-        return 0 <= x < COLS and y < ROWS
+        return 0 <= x < COLS and -HIDDEN <= y < ROWS
 
     def free(self, x: int, y: int) -> bool:
-        if y < 0:
-            return 0 <= x < COLS
-        return self.inside(x, y) and self.grid[y][x] is None
+        if not self.inside(x, y):
+            return False
+        return self.grid[self._row(y)][x] is None
 
     def fits(self, piece: Piece) -> bool:
         return all(self.free(x, y) for x, y in piece.blocks())
 
     def lock(self, piece: Piece) -> None:
         for x, y in piece.blocks():
-            if 0 <= y < ROWS and 0 <= x < COLS:
-                self.grid[y][x] = piece.kind
+            if self.inside(x, y):
+                self.grid[self._row(y)][x] = piece.kind
+
+    def cell(self, x: int, y: int) -> Optional[str]:
+        if not (0 <= x < COLS and 0 <= y < ROWS):
+            return None
+        return self.grid[self._row(y)][x]
 
     def full_rows(self) -> list[int]:
-        return [y for y in range(ROWS) if all(self.grid[y][x] is not None for x in range(COLS))]
+        return [
+            y
+            for y in range(-HIDDEN, ROWS)
+            if all(self.grid[self._row(y)][x] is not None for x in range(COLS))
+        ]
 
     def clear_rows(self, rows: list[int]) -> None:
-        keep = [self.grid[y] for y in range(ROWS) if y not in set(rows)]
+        skip = set(rows)
+        keep = [self.grid[self._row(y)] for y in range(-HIDDEN, ROWS) if y not in skip]
         pad = [[None] * COLS for _ in range(len(rows))]
         self.grid = pad + keep
 
@@ -305,9 +315,9 @@ class Board:
         cx, cy = piece.x + 1, piece.y + 1
         count = 0
         for x, y in ((cx - 1, cy - 1), (cx + 1, cy - 1), (cx - 1, cy + 1), (cx + 1, cy + 1)):
-            if y < 0:
+            if y < -HIDDEN:
                 continue
-            if not self.inside(x, y) or self.grid[y][x] is not None:
+            if not self.inside(x, y) or self.grid[self._row(y)][x] is not None:
                 count += 1
         return count
 
@@ -747,9 +757,6 @@ class Game:
         piece = Piece(kind)
         if self.board.fits(piece):
             return piece
-        piece.y -= 1
-        if self.board.fits(piece):
-            return piece
         return None
 
     def spawn(self) -> Optional[Piece]:
@@ -908,7 +915,12 @@ class Game:
         if self.piece is None:
             return
         tspin = self.piece.kind == "T" and self.last_rotate and self.board.occupied_corners(self.piece) >= 3
+        locked = self.piece.blocks()
         self.board.lock(self.piece)
+        if all(y < 0 for _x, y in locked):
+            self.finish(False)
+            self.piece = None
+            return
         rows = self.board.full_rows()
         if rows:
             self.just_scored = len(rows)
@@ -1504,14 +1516,9 @@ class App:
                 put(x + i, y, ch, fg, bgc)
 
         def put_cell(x: int, y: int, color: tuple[int, int, int], ghost: bool = False, filled: bool = True) -> None:
-            if not filled:
-                put(x, y, " ", theme.fg, color)
-                put(x + 1, y, " ", theme.fg, color)
-                return
-            seam = theme.grout
-            face = mix(color, theme.well, 0.22) if ghost else color
-            put(x, y, "▄", face, seam)
-            put(x + 1, y, " ", theme.fg, seam)
+            face = mix(color, theme.well, 0.3) if ghost else color
+            put(x, y, " ", theme.fg, face)
+            put(x + 1, y, " ", theme.fg, face)
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)
@@ -1527,7 +1534,7 @@ class App:
 
         for y in range(ROWS):
             for x in range(COLS):
-                kind = game.board.grid[y][x]
+                kind = game.board.cell(x, y)
                 if kind:
                     color = theme.piece(kind)
                     if y in game.clearing:
