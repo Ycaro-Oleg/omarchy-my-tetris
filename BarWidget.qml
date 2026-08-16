@@ -63,10 +63,16 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "\uf11b"
+    text: ""
     slotSize: Style.bar.iconSlot
     fontSize: Style.font.caption
     tooltipText: "Tetris"
+    iconComponent: Component {
+      TetrisMark {
+        anchors.fill: parent
+        foreground: button.foreground
+      }
+    }
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton || buttonCode === Qt.MiddleButton)
         root.play()

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import array
 import json
-import math
 import os
 import random
 import re
@@ -22,6 +21,7 @@ from typing import Optional
 
 COLS = 10
 ROWS = 20
+HIDDEN = 4
 CELL = 2
 TICK = 1.0 / 30.0
 LOCK_MS = 500
@@ -36,7 +36,6 @@ MUSIC_THEMES = ("piano", "strings", "music-box")
 MUSIC_LABEL = {"piano": "piano", "strings": "strings", "music-box": "music box"}
 CARD_W = 46
 BOARD_ROWS = 4
-FIRE_GLYPHS = " .:+=*#%@"
 
 FALLBACK = {
     "mode": "dark",
@@ -212,12 +211,6 @@ class Theme:
         return self.rgb("muted")
 
     @property
-    def grid_ink(self) -> tuple[int, int, int]:
-        if self.mode == "light":
-            return (24, 22, 20)
-        return (244, 240, 232)
-
-    @property
     def accent(self) -> tuple[int, int, int]:
         return self.rgb("accent")
 
@@ -279,29 +272,42 @@ class Piece:
 
 class Board:
     def __init__(self) -> None:
-        self.grid: list[list[Optional[str]]] = [[None] * COLS for _ in range(ROWS)]
+        self.grid: list[list[Optional[str]]] = [[None] * COLS for _ in range(HIDDEN + ROWS)]
+
+    def _row(self, y: int) -> int:
+        return y + HIDDEN
 
     def inside(self, x: int, y: int) -> bool:
-        return 0 <= x < COLS and y < ROWS
+        return 0 <= x < COLS and -HIDDEN <= y < ROWS
 
     def free(self, x: int, y: int) -> bool:
-        if y < 0:
-            return 0 <= x < COLS
-        return self.inside(x, y) and self.grid[y][x] is None
+        if not self.inside(x, y):
+            return False
+        return self.grid[self._row(y)][x] is None
 
     def fits(self, piece: Piece) -> bool:
         return all(self.free(x, y) for x, y in piece.blocks())
 
     def lock(self, piece: Piece) -> None:
         for x, y in piece.blocks():
-            if 0 <= y < ROWS and 0 <= x < COLS:
-                self.grid[y][x] = piece.kind
+            if self.inside(x, y):
+                self.grid[self._row(y)][x] = piece.kind
+
+    def cell(self, x: int, y: int) -> Optional[str]:
+        if not (0 <= x < COLS and 0 <= y < ROWS):
+            return None
+        return self.grid[self._row(y)][x]
 
     def full_rows(self) -> list[int]:
-        return [y for y in range(ROWS) if all(self.grid[y][x] is not None for x in range(COLS))]
+        return [
+            y
+            for y in range(-HIDDEN, ROWS)
+            if all(self.grid[self._row(y)][x] is not None for x in range(COLS))
+        ]
 
     def clear_rows(self, rows: list[int]) -> None:
-        keep = [self.grid[y] for y in range(ROWS) if y not in set(rows)]
+        skip = set(rows)
+        keep = [self.grid[self._row(y)] for y in range(-HIDDEN, ROWS) if y not in skip]
         pad = [[None] * COLS for _ in range(len(rows))]
         self.grid = pad + keep
 
@@ -309,9 +315,9 @@ class Board:
         cx, cy = piece.x + 1, piece.y + 1
         count = 0
         for x, y in ((cx - 1, cy - 1), (cx + 1, cy - 1), (cx - 1, cy + 1), (cx + 1, cy + 1)):
-            if y < 0:
+            if y < -HIDDEN:
                 continue
-            if not self.inside(x, y) or self.grid[y][x] is not None:
+            if not self.inside(x, y) or self.grid[self._row(y)][x] is not None:
                 count += 1
         return count
 
@@ -519,7 +525,6 @@ class Music:
     RATE = 44100
     CHANNELS = 2
     FRAME = 4
-    FADE_MS = 1100
     CHUNK = 4096 * 4
 
     def __init__(self, settings: Settings) -> None:
@@ -530,11 +535,15 @@ class Music:
         self.pcm = b""
         self.loaded = ""
         self.cursor = 0
-        self.wrap_to = 0
         self.lock = threading.Lock()
 
     def path_for(self, theme: str) -> Path:
-        return ROOT / "sounds" / "themes" / f"{theme}.mp3"
+        base = ROOT / "sounds" / "themes" / theme
+        for ext in (".opus", ".ogg", ".mp3"):
+            path = base.with_suffix(ext)
+            if path.is_file():
+                return path
+        return base.with_suffix(".opus")
 
     def gain(self) -> float:
         if self.settings.music_muted or self.settings.music_volume <= 0:
@@ -603,53 +612,6 @@ class Music:
             return b""
         return proc.stdout
 
-    def _trim(self, pcm: bytes) -> bytes:
-        frame = self.FRAME
-        n = len(pcm) // frame
-        if n < self.RATE:
-            return pcm
-        window = 1024
-        threshold = 180
-
-        def loud(index: int) -> bool:
-            start = index * frame
-            chunk = pcm[start : start + window * frame]
-            if len(chunk) < frame:
-                return False
-            samples = array.array("h")
-            samples.frombytes(chunk[: len(chunk) - len(chunk) % 2])
-            if not samples:
-                return False
-            mean = sum(s * s for s in samples) / len(samples)
-            return mean ** 0.5 > threshold
-
-        head = 0
-        while head + window < n and not loud(head):
-            head += window
-        tail = n
-        while tail - window > head and not loud(tail - window):
-            tail -= window
-        return pcm[head * frame : tail * frame]
-
-    def _crossfade(self, pcm: bytes) -> tuple[bytes, int]:
-        frame = self.FRAME
-        n = len(pcm) // frame
-        fade = int(self.RATE * self.FADE_MS / 1000)
-        if fade < 64 or n <= fade * 2:
-            return pcm, 0
-        samples = array.array("h")
-        samples.frombytes(pcm)
-        fade_n = fade * self.CHANNELS
-        for i in range(fade_n):
-            t = i / fade_n
-            mixed = int(samples[-fade_n + i] * (1.0 - t) + samples[i] * t)
-            if mixed > 32767:
-                mixed = 32767
-            elif mixed < -32768:
-                mixed = -32768
-            samples[-fade_n + i] = mixed
-        return samples.tobytes(), fade * self.FRAME
-
     def _ensure(self) -> bool:
         theme = self.settings.theme if self.settings.theme in MUSIC_THEMES else "piano"
         if theme == self.loaded and self.pcm:
@@ -660,12 +622,10 @@ class Music:
             self.pcm = b""
             self.loaded = ""
             return False
-        looped, wrap_to = self._crossfade(self._trim(raw))
         with self.lock:
-            self.pcm = looped
+            self.pcm = raw
             self.loaded = theme
             self.cursor = 0
-            self.wrap_to = wrap_to
         return True
 
     def _spawn(self) -> None:
@@ -718,7 +678,6 @@ class Music:
         with self.lock:
             pcm = self.pcm
             cursor = self.cursor
-            wrap_to = self.wrap_to
         if not pcm:
             return b"\x00" * size
         out = bytearray()
@@ -727,7 +686,7 @@ class Music:
             out.extend(pcm[cursor : cursor + take])
             cursor += take
             if cursor >= len(pcm):
-                cursor = min(wrap_to, max(0, len(pcm) - self.FRAME))
+                cursor = 0
         with self.lock:
             if self.pcm is pcm:
                 self.cursor = cursor
@@ -796,9 +755,6 @@ class Game:
 
     def spawn_piece(self, kind: str) -> Optional[Piece]:
         piece = Piece(kind)
-        if self.board.fits(piece):
-            return piece
-        piece.y -= 1
         if self.board.fits(piece):
             return piece
         return None
@@ -959,7 +915,12 @@ class Game:
         if self.piece is None:
             return
         tspin = self.piece.kind == "T" and self.last_rotate and self.board.occupied_corners(self.piece) >= 3
+        locked = self.piece.blocks()
         self.board.lock(self.piece)
+        if all(y < 0 for _x, y in locked):
+            self.finish(False)
+            self.piece = None
+            return
         rows = self.board.full_rows()
         if rows:
             self.just_scored = len(rows)
@@ -1016,7 +977,7 @@ class Game:
                 count = len(self.clearing)
                 self.board.clear_rows(self.clearing)
                 self.clearing = []
-                self.apply_clear(count, getattr(self, "pending_tspin", False))
+                self.apply_clear(count, self.pending_tspin)
                 if self.alive:
                     self.piece = self.spawn()
             return
@@ -1108,37 +1069,6 @@ def score_line(mode: str, row: dict) -> str:
     return f"{name:<12}  {value:>8}  {when}"
 
 
-class Ember:
-    def __init__(self, width: int, height: int) -> None:
-        self.w = max(8, width)
-        self.h = max(3, height)
-        self.heat = [0.0] * (self.w * self.h)
-
-    def step(self, now: float) -> None:
-        w, h = self.w, self.h
-        for x in range(w):
-            self.heat[(h - 1) * w + x] = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(now * 9.0 + x * 0.55))
-        for y in range(h - 1):
-            for x in range(w):
-                below = self.heat[(y + 1) * w + x]
-                left = self.heat[(y + 1) * w + max(0, x - 1)]
-                right = self.heat[(y + 1) * w + min(w - 1, x + 1)]
-                self.heat[y * w + x] = (below * 0.46 + left * 0.27 + right * 0.27) * 0.88
-
-    def cell(self, x: int, y: int, theme: Theme) -> tuple[str, tuple[int, int, int]]:
-        value = self.heat[y * self.w + x]
-        index = min(len(FIRE_GLYPHS) - 1, max(0, int(value * len(FIRE_GLYPHS))))
-        if value < 0.18:
-            color = theme.muted
-        elif value < 0.42:
-            color = theme.rgb("red")
-        elif value < 0.7:
-            color = theme.rgb("orange")
-        else:
-            color = theme.rgb("yellow")
-        return FIRE_GLYPHS[index], color
-
-
 def term_size() -> tuple[int, int]:
     try:
         size = os.get_terminal_size()
@@ -1154,16 +1084,6 @@ class Screen:
 
     def refresh_size(self) -> None:
         self.cols, self.rows = term_size()
-
-    def cell(self, color: tuple[int, int, int], ghost: bool = False) -> str:
-        if ghost:
-            body = mix(color, self.theme.well, 0.38)
-            return paint("░░", body, self.theme.well)
-        return paint("  ", self.theme.fg, color)
-
-    def blank_well(self, x: int, y: int) -> str:
-        shade = self.theme.well_alt if (x + y) % 2 else self.theme.well
-        return paint("  ", self.theme.fg, shade)
 
     def fill_line(self, width: int, bg: tuple[int, int, int]) -> str:
         return paint(" " * width, self.theme.fg, bg) + RESET
@@ -1185,7 +1105,6 @@ class App:
         self.buf = bytearray()
         self.celebrate_mode: Optional[str] = None
         self.celebrate_until = 0.0
-        self.ember = Ember(CARD_W, 3)
         self.vol_flash_until = 0.0
         self.vol_flash = "game"
 
@@ -1597,18 +1516,9 @@ class App:
                 put(x + i, y, ch, fg, bgc)
 
         def put_cell(x: int, y: int, color: tuple[int, int, int], ghost: bool = False, filled: bool = True) -> None:
-            if not filled:
-                put(x, y, " ", theme.fg, color)
-                put(x + 1, y, " ", theme.fg, color)
-                return
-            if ghost:
-                ink = mix(theme.grid_ink, theme.well, 0.45)
-                put(x, y, "[", ink, theme.well)
-                put(x + 1, y, "]", ink, theme.well)
-                return
-            ink = theme.grid_ink
-            put(x, y, "[", ink, color)
-            put(x + 1, y, "]", ink, color)
+            face = mix(color, theme.well, 0.3) if ghost else color
+            put(x, y, " ", theme.fg, face)
+            put(x + 1, y, " ", theme.fg, face)
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)
@@ -1624,7 +1534,7 @@ class App:
 
         for y in range(ROWS):
             for x in range(COLS):
-                kind = game.board.grid[y][x]
+                kind = game.board.cell(x, y)
                 if kind:
                     color = theme.piece(kind)
                     if y in game.clearing:

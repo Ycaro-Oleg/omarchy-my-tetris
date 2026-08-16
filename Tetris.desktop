@@ -4,7 +4,7 @@ Type=Application
 Name=Tetris
 Comment=Theme-aware terminal Tetris
 Exec=sh -c 'omarchy-launch-or-focus-tui --app-id=org.omarchy.tetris "$HOME/.config/omarchy/plugins/terminal.tetris/omarchy-tetris"'
-Icon=applications-games
+Icon=omarchy-tetris
 Terminal=false
 Categories=Game;BlocksGame;
 StartupNotify=true
