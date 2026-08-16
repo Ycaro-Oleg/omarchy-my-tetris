@@ -1440,7 +1440,7 @@ class App:
                 game.saved = True
 
     def min_size(self) -> tuple[int, int]:
-        return (64, 32) if self.page == "menu" else (56, 24)
+        return (56, 26) if self.page == "menu" else (56, 24)
 
     def celebrating(self, mode: str) -> bool:
         return self.celebrate_mode == mode and time.monotonic() < self.celebrate_until
@@ -1503,15 +1503,15 @@ class App:
 
     def draw_menu(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
         theme = self.theme
-        card_w = min(CARD_W, max(36, cols - 4))
+        card_w = min(40, max(32, cols - 6))
         left = max(0, (cols - card_w) // 2)
-        inner_w = card_w - 4
         selected_mode = MODES[self.menu_index]
         board = self.scores.rows(selected_mode)
         board_h = max(1, len(board))
-        height = 25 + board_h
+        height = 20 + board_h
         top = max(1, (rows - height) // 2)
         canvas = [[(" ", theme.fg, bg) for _ in range(cols)] for _ in range(rows)]
+        well = theme.well
 
         def put(x: int, y: int, ch: str, fg: tuple[int, int, int], bgc: tuple[int, int, int]) -> None:
             if 0 <= y < rows and 0 <= x < cols:
@@ -1524,6 +1524,9 @@ class App:
         def fill(x: int, y: int, width: int, fg: tuple[int, int, int], bgc: tuple[int, int, int]) -> None:
             put_str(x, y, " " * max(0, width), fg, bgc)
 
+        def mid(text: str) -> int:
+            return left + max(0, (card_w - len(text)) // 2)
+
         letters = [
             ("T", theme.piece("T")),
             ("E", theme.piece("I")),
@@ -1533,103 +1536,87 @@ class App:
             ("S", theme.piece("S")),
         ]
         title = "  ".join(ch for ch, _ in letters)
-        title_x = left + max(0, (card_w - len(title)) // 2)
+        title_x = mid(title)
         for i, (ch, color) in enumerate(letters):
             put(title_x + i * 3, top, ch, color, bg)
 
-        box_y = top + 2
-        box_h = 10
-        well = theme.well
-        put_str(left, box_y, "╭" + "─" * (card_w - 2) + "╮", theme.muted, well)
-        for row in range(1, box_h - 1):
-            put(left, box_y + row, "│", theme.muted, well)
-            fill(left + 1, box_y + row, card_w - 2, theme.fg, well)
-            put(left + card_w - 1, box_y + row, "│", theme.muted, well)
-        put_str(left, box_y + box_h - 1, "╰" + "─" * (card_w - 2) + "╯", theme.muted, well)
-
+        y = top + 2
         for i, mode in enumerate(MODES):
-            y = box_y + 1 + i * 3
             selected = i == self.menu_index
-            row_bg = mix(theme.selection, well, 0.62) if selected else well
-            ink = theme.accent if selected else theme.fg
-            dim = theme.accent if selected else theme.muted
+            label = f"{'▸ ' if selected else '  '}{MODE_LABEL[mode]}"
+            put_str(mid(label), y, label, theme.accent if selected else theme.muted, bg)
+            y += 1
             if selected:
-                fill(left + 1, y, card_w - 2, ink, row_bg)
-                fill(left + 1, y + 1, card_w - 2, dim, row_bg)
-            mark = "▸ " if selected else "  "
-            put_str(left + 2, y, f"{mark}{MODE_LABEL[mode]}", ink, row_bg)
-            put_str(left + 4, y + 1, MODE_BLURB[mode][:inner_w], dim, row_bg)
+                blurb = MODE_BLURB[mode]
+                put_str(mid(blurb), y, blurb[:card_w], theme.fg, bg)
+                y += 1
 
-        vol_y = box_y + box_h + 1
-
-        def draw_bar(y: int, label: str, value: int) -> None:
-            bar = volume_bar(value, 14)
-            percent = "off" if value <= 0 else f"{value}%"
-            text = f"{label:<5} {bar}  {percent}"
-            x = left + max(0, (card_w - len(text)) // 2)
-            put_str(x, y, f"{label:<5} ", theme.muted, bg)
-            bx = x + 6
-            for i, ch in enumerate(bar):
-                color = theme.accent if ch == "█" else theme.muted
-                put(bx + i, y, ch, color, bg)
-            put_str(bx + len(bar) + 2, y, percent, theme.fg, bg)
-
-        draw_bar(vol_y, "game", self.settings.sound_volume)
-        music_value = 0 if self.settings.music_muted else self.settings.music_volume
-        draw_bar(vol_y + 1, "music", music_value)
-        music = MUSIC_LABEL.get(self.settings.theme, self.settings.theme)
-        state = "muted" if self.settings.music_muted else music
-        extra = f"{self.settings.sound}   {state}"
-        put_str(left + max(0, (card_w - len(extra)) // 2), vol_y + 2, extra, theme.muted, bg)
-
+        y += 1
         look = self.settings.look if self.settings.look in LOOKS else "nes"
-        look_y = vol_y + 4
-        put_str(left + 2, look_y, "look  ", theme.muted, bg)
-        put_str(left + 8, look_y, f"◂ {LOOK_LABEL[look]} ▸", theme.accent, bg)
+        look_txt = f"look   ◂ {LOOK_LABEL[look]} ▸"
+        put_str(mid(look_txt), y, "look   ", theme.muted, bg)
+        put_str(mid(look_txt) + 7, y, f"◂ {LOOK_LABEL[look]} ▸", theme.accent, bg)
         blocks = SHAPES["T"][0]
         minx = min(b[0] for b in blocks)
         miny = min(b[1] for b in blocks)
         maxx = max(b[0] for b in blocks)
         preview_w = (maxx - minx + 1) * CELL
-        sx = left + card_w - 2 - preview_w
+        sx = left + (card_w - preview_w) // 2
+        y += 1
         for row in range(2):
-            fill(sx - 1, look_y + row, preview_w + 2, theme.fg, well)
+            fill(sx, y + row, preview_w, theme.fg, well)
         for cx, cy in blocks:
             paint_mino(
                 put,
                 theme,
                 look,
                 sx + (cx - minx) * CELL,
-                look_y + (cy - miny),
+                y + (cy - miny),
                 theme.piece("T"),
             )
-        strip_x = left + 2
-        strip_y = look_y + 1
-        if sx - strip_x >= 7 * CELL + 2:
-            for i, kind in enumerate("IOTSZJL"):
-                paint_mino(put, theme, look, strip_x + i * CELL, strip_y, theme.piece(kind))
+        y += 3
+
+        def draw_bar(row: int, label: str, value: int) -> None:
+            bar = volume_bar(value, 12)
+            percent = "off" if value <= 0 else f"{value}%"
+            text = f"{label}  {bar}  {percent}"
+            x = mid(text)
+            put_str(x, row, f"{label}  ", theme.muted, bg)
+            bx = x + len(label) + 2
+            for i, ch in enumerate(bar):
+                put(bx + i, row, ch, theme.accent if ch == "█" else theme.muted, bg)
+            put_str(bx + len(bar) + 2, row, percent, theme.fg, bg)
+
+        draw_bar(y, "game", self.settings.sound_volume)
+        music_value = 0 if self.settings.music_muted else self.settings.music_volume
+        draw_bar(y + 1, "music", music_value)
+        music = MUSIC_LABEL.get(self.settings.theme, self.settings.theme)
+        extra = "muted" if self.settings.music_muted else f"{self.settings.sound}  ·  {music}"
+        put_str(mid(extra), y + 2, extra, theme.muted, bg)
+        y += 4
 
         if time.monotonic() < self.bar_note_until and self.bar_note:
-            put_str(left + 2, look_y + 2, self.bar_note[: card_w - 4], theme.accent, bg)
+            put_str(mid(self.bar_note), y, self.bar_note[:card_w], theme.accent, bg)
         else:
-            put_str(left + 2, look_y + 2, "i   remove the Tetris icon from the bar", theme.accent, bg)
-            put_str(left + 2, look_y + 3, "u   put the Tetris icon on the bar", theme.muted, bg)
+            bar_line = "i  bar off     u  bar on"
+            put_str(mid(bar_line), y, bar_line, theme.muted, bg)
+        y += 2
 
-        board_y = look_y + 5
         heading = f"board  ·  {MODE_LABEL[selected_mode]}"
-        put_str(left + max(0, (card_w - len(heading)) // 2), board_y, heading, theme.muted, bg)
+        put_str(mid(heading), y, heading, theme.muted, bg)
+        y += 1
         if board:
             for index, row in enumerate(board):
-                mark = "♔ " if index == 0 else f"{index + 1} "
-                line = f"  {mark}{score_line(selected_mode, row)}"
+                mark = "♔ " if index == 0 else f"{index + 1}  "
+                line = f"{mark}{score_line(selected_mode, row)}"
                 color = theme.accent if index == 0 else theme.muted
-                put_str(left + 2, board_y + 1 + index, line[: card_w - 2], color, bg)
+                put_str(mid(line), y + index, line[:card_w], color, bg)
         else:
             empty = "no games yet"
-            put_str(left + max(0, (card_w - len(empty)) // 2), board_y + 1, empty, theme.muted, bg)
+            put_str(mid(empty), y, empty, theme.muted, bg)
 
-        hint = "enter   ←→ look   i bar off   u bar on   t music   m mute   q"
-        put_str(left + max(0, (card_w - len(hint)) // 2), min(rows - 1, board_y + board_h + 2), hint, theme.muted, bg)
+        hint = "enter  start     q  quit"
+        put_str(mid(hint), min(rows - 1, y + board_h + 2), hint, theme.muted, bg)
         return self.paint_canvas(canvas)
 
     def draw_play(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
