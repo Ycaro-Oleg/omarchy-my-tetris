@@ -1,6 +1,6 @@
 # Tetris
 
-A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows the theme you already have selected. A landing sound plays when a piece first sits on the stack, and a short chime plays when lines clear.
+A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows the theme you already have selected. Pieces are drawn as little squares. A landing sound plays when a piece first sits on the stack, a chime plays when lines clear, and a quiet 8-bit loop sits under the game. All of that follows the volume bar.
 
 The game opens as a normal tiled window, so it joins whatever layout you are already using. Move and resize it with your usual keys.
 
@@ -40,7 +40,7 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | r | Retry |
 | q | Menu, or quit from the menu |
 
-Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use one shared chime. Volume and voice are shared between the panel and the game in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. A new personal best lights that row with ASCII fire.
+Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use one shared chime. Quiet 8-bit music loops in the background. Volume and voice are shared between the panel and the game in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
 
 ## Configure
 

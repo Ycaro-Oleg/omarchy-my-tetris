@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "terminal.tetris",
   "name": "Tetris",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Omarchy Tetris",
   "license": "MIT",
   "description": "Theme-aware terminal Tetris with Classic, Sprint, and Ultra modes.",

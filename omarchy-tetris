@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import termios
+import threading
 import time
 import tty
 from pathlib import Path
@@ -206,6 +207,12 @@ class Theme:
     @property
     def muted(self) -> tuple[int, int, int]:
         return self.rgb("muted")
+
+    @property
+    def grid_ink(self) -> tuple[int, int, int]:
+        if self.mode == "light":
+            return (24, 22, 20)
+        return (244, 240, 232)
 
     @property
     def accent(self) -> tuple[int, int, int]:
@@ -459,6 +466,84 @@ class Sound:
             self.children.append(child)
         except OSError:
             return
+
+
+class Music:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.path = ROOT / "sounds" / "music.wav"
+        self.player = None
+        for name in ("pw-play", "paplay", "aplay"):
+            found = shutil.which(name)
+            if found:
+                self.player = found
+                break
+        self.running = False
+        self.thread: Optional[threading.Thread] = None
+        self.child: Optional[subprocess.Popen] = None
+        self.last_volume = -1
+
+    def gain(self) -> float:
+        if self.settings.volume <= 0:
+            return 0.0
+        return max(0.14, min(0.40, 0.12 + self.settings.volume / 100.0 * 0.26))
+
+    def start(self) -> None:
+        if self.running or self.player is None or not self.path.is_file():
+            return
+        self.running = True
+        self.thread = threading.Thread(target=self._loop, daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.running = False
+        self._kill()
+        if self.thread is not None:
+            self.thread.join(timeout=0.5)
+            self.thread = None
+
+    def _kill(self) -> None:
+        if self.child is None:
+            return
+        if self.child.poll() is None:
+            self.child.terminate()
+            try:
+                self.child.wait(timeout=0.35)
+            except subprocess.TimeoutExpired:
+                self.child.kill()
+        self.child = None
+
+    def _spawn(self) -> None:
+        command = [self.player]
+        if self.player.endswith("pw-play"):
+            command.extend(["--volume", f"{self.gain():.2f}"])
+        elif self.player.endswith("paplay"):
+            command.append(f"--volume={int(self.gain() * 65536)}")
+        command.append(str(self.path))
+        try:
+            self.child = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            self.child = None
+
+    def _loop(self) -> None:
+        while self.running:
+            volume = self.settings.volume
+            if volume <= 0:
+                self._kill()
+                self.last_volume = volume
+                time.sleep(0.12)
+                continue
+            if volume != self.last_volume:
+                self._kill()
+                self.last_volume = volume
+            if self.child is None or self.child.poll() is not None:
+                self._spawn()
+            time.sleep(0.08)
 
 
 class Game:
@@ -876,6 +961,7 @@ class App:
         self.scores = Scores()
         self.settings = Settings()
         self.sound = Sound(self.settings)
+        self.music = Music(self.settings)
         self.page = "menu"
         self.menu_index = 0
         self.game: Optional[Game] = None
@@ -1144,7 +1230,7 @@ class App:
         inner_w = card_w - 4
         selected_mode = MODES[self.menu_index]
         board = self.scores.rows(selected_mode)
-        fire_on = self.celebrating(selected_mode) and bool(board)
+        fire_on = bool(board)
         board_h = 3 + max(0, len(board) - 1) if fire_on else max(1, len(board))
         height = 18 + board_h
         top = max(1, (rows - height) // 2)
@@ -1216,20 +1302,20 @@ class App:
         if fire_on:
             self.ember.step(time.monotonic())
             row = board[0]
-            text = score_line(selected_mode, row)
-            text = text[: card_w - 8]
+            text = score_line(selected_mode, row)[: max(8, card_w - 10)]
+            name = str(row.get("name") or player_name())
             box_top = board_y + 1
+            ash = theme.rgb("darker_background")
             for y in range(3):
                 for x in range(card_w):
                     glyph, color = self.ember.cell(x, y, theme)
-                    put(left + x, box_top + y, glyph, color, theme.rgb("darker_background"))
-            name = str(row.get("name") or player_name())
-            inner = f" {name} "
-            put_str(left + max(0, (card_w - len(inner)) // 2), box_top, inner, theme.rgb("yellow"), theme.rgb("darker_background"))
-            put_str(left + max(0, (card_w - len(text)) // 2), box_top + 1, text, theme.fg, theme.rgb("darker_background"))
+                    put(left + x, box_top + y, glyph, color, ash)
+            label = f" 1  {name} "
+            put_str(left + 3, box_top, label[: card_w - 6], theme.rgb("yellow"), ash)
+            put_str(left + 3, box_top + 1, f"    {text}"[: card_w - 6], theme.fg, ash)
             extra_y = box_top + 3
             for index, extra in enumerate(board[1:]):
-                line = f"  {score_line(selected_mode, extra)}"
+                line = f"  {index + 2}  {score_line(selected_mode, extra)}"
                 put_str(left + 2, extra_y + index, line[:card_w - 2], theme.muted, bg)
         elif board:
             for index, row in enumerate(board):
@@ -1266,14 +1352,19 @@ class App:
             for i, ch in enumerate(text):
                 put(x + i, y, ch, fg, bgc)
 
-        def put_cell(x: int, y: int, color: tuple[int, int, int], ghost: bool = False) -> None:
-            if ghost:
-                ink = mix(color, theme.well, 0.42)
-                put(x, y, "░", ink, theme.well)
-                put(x + 1, y, "░", ink, theme.well)
-            else:
+        def put_cell(x: int, y: int, color: tuple[int, int, int], ghost: bool = False, filled: bool = True) -> None:
+            if not filled:
                 put(x, y, " ", theme.fg, color)
                 put(x + 1, y, " ", theme.fg, color)
+                return
+            if ghost:
+                ink = mix(theme.grid_ink, theme.well, 0.45)
+                put(x, y, "[", ink, theme.well)
+                put(x + 1, y, "]", ink, theme.well)
+                return
+            ink = theme.grid_ink
+            put(x, y, "[", ink, color)
+            put(x + 1, y, "]", ink, color)
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)
@@ -1283,7 +1374,7 @@ class App:
             put(well0 + well_w - 1, well_y + y, "│", theme.muted, theme.well)
             for x in range(COLS):
                 shade = theme.well_alt if (x + y) % 2 else theme.well
-                put_cell(well0 + 1 + x * CELL, well_y + y, shade)
+                put_cell(well0 + 1 + x * CELL, well_y + y, shade, filled=False)
         put_str(well0, well_y - 1, "╭" + "─" * (well_w - 2) + "╮", theme.muted, theme.well)
         put_str(well0, well_y + ROWS, "╰" + "─" * (well_w - 2) + "╯", theme.muted, theme.well)
 
@@ -1431,6 +1522,7 @@ class App:
 
         signal.signal(signal.SIGINT, handle_int)
         signal.signal(signal.SIGTERM, handle_int)
+        self.music.start()
         try:
             while self.running:
                 self.theme.reload()
@@ -1452,6 +1544,7 @@ class App:
                 else:
                     self.handle_play(keys)
         finally:
+            self.music.stop()
             self.restore_term()
         return 0
 
