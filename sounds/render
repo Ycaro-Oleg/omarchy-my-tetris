@@ -79,6 +79,25 @@ def hush():
     return samples
 
 
+def fail():
+    samples = []
+    notes = ((392, 0.08), (311, 0.09), (247, 0.11), (185, 0.22))
+    for freq, length in notes:
+        n = int(RATE * length)
+        for i in range(n):
+            t = i / RATE
+            square = 1.0 if math.sin(2 * math.pi * freq * t) >= 0 else -1.0
+            odd = 0.18 * math.sin(2 * math.pi * freq * 3 * t)
+            e = math.exp(-t * (8 + (0.22 - length) * 20)) * (1.0 - math.exp(-t * 90))
+            samples.append(quantize((square * 0.22 + odd) * e, 6))
+    tail = int(RATE * 0.08)
+    for i in range(tail):
+        t = i / RATE
+        rumble = math.sin(2 * math.pi * 70 * t) * math.exp(-t * 18) * 0.16
+        samples.append(quantize(rumble, 6))
+    return samples
+
+
 def clear(spread=1):
     samples = []
     n = int(RATE * (0.15 + 0.012 * spread))
@@ -105,3 +124,4 @@ if __name__ == "__main__":
     write_wav("clear.wav", clear(1))
     for n in range(1, 8):
         write_wav(f"clear-{n}.wav", clear(n))
+    write_wav("fail.wav", fail())
