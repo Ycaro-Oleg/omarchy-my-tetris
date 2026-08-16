@@ -4,7 +4,7 @@ A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows t
 
 The game opens as a normal tiled window, so it joins whatever layout you are already using. Move and resize it with your usual keys. Dark themes use `icon-white.svg`; light themes use the original black `icon.svg`.
 
-## 1.5.0
+## 1.4.0
 
 This release adds a way to start the game from any terminal, a way to take the bar icon off if you do not want it, and a full key list on the menu.
 
