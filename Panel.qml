@@ -155,7 +155,7 @@ Panel {
         }
 
         PanelSectionHeader {
-          text: root.volume === 0 ? "Volume  off" : "Volume  " + root.volume
+          text: root.volume === 0 ? "Volume  off" : "Volume  " + root.volume + "%"
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
         }

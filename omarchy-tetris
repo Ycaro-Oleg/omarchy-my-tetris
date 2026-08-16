@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import re
@@ -29,6 +30,9 @@ THEME_PATH = Path.home() / ".local/state/omarchy/current/theme/colors.toml"
 SCORE_PATH = Path.home() / ".local/share/omarchy-tetris/scores.json"
 CONFIG_PATH = Path.home() / ".local/state/omarchy/tetris.json"
 SOUND_VOICES = ("thock", "click", "chip", "hush")
+CARD_W = 46
+BOARD_ROWS = 4
+FIRE_GLYPHS = " .:+=*#%@"
 
 FALLBACK = {
     "mode": "dark",
@@ -325,7 +329,19 @@ class Scores:
         tmp.write_text(json.dumps(self.data, indent=2) + "\n", encoding="utf-8")
         tmp.replace(SCORE_PATH)
 
-    def add(self, mode: str, row: dict) -> None:
+    def beats(self, mode: str, row: dict, best: Optional[dict]) -> bool:
+        if best is None:
+            return True
+        if mode == "sprint":
+            if not row.get("finished"):
+                return False
+            if not best.get("finished"):
+                return True
+            return int(row.get("time_ms", 10**9)) < int(best.get("time_ms", 10**9))
+        return int(row.get("score", 0)) > int(best.get("score", 0))
+
+    def add(self, mode: str, row: dict) -> tuple[int, bool]:
+        record = self.beats(mode, row, self.best(mode))
         bucket = list(self.data.get(mode, []))
         bucket.append(row)
         if mode == "sprint":
@@ -334,10 +350,19 @@ class Scores:
             bucket.sort(key=lambda item: -int(item.get("score", 0)))
         self.data[mode] = bucket[:8]
         self.save()
+        rank = 0
+        for index, item in enumerate(self.data[mode]):
+            if item is row or item == row:
+                rank = index
+                break
+        return rank, record
 
     def best(self, mode: str) -> Optional[dict]:
         rows = self.data.get(mode) or []
         return rows[0] if rows else None
+
+    def rows(self, mode: str, limit: int = BOARD_ROWS) -> list[dict]:
+        return list(self.data.get(mode) or [])[:limit]
 
 
 class Settings:
@@ -398,7 +423,7 @@ class Sound:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.player = self._player()
-        self.child: Optional[subprocess.Popen] = None
+        self.children: list[subprocess.Popen] = []
 
     def _player(self) -> Optional[list[str]]:
         for name in ("pw-play", "paplay", "aplay"):
@@ -424,16 +449,16 @@ class Sound:
             command.append(f"--volume={int(self.settings.volume / 100.0 * 65536)}")
         command.append(str(path))
         try:
-            if self.child and self.child.poll() is None:
-                self.child.terminate()
-            self.child = subprocess.Popen(
+            self.children = [child for child in self.children if child.poll() is None]
+            child = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
+            self.children.append(child)
         except OSError:
-            self.child = None
+            return
 
 
 class Game:
@@ -467,6 +492,7 @@ class Game:
         self.pause_started = 0.0
         self.was_grounded = False
         self.just_landed = False
+        self.just_scored = False
         self.piece = self.spawn()
 
     def spawn_piece(self, kind: str) -> Optional[Piece]:
@@ -614,6 +640,11 @@ class Game:
         self.just_landed = False
         return hit
 
+    def consume_score(self) -> bool:
+        hit = self.just_scored
+        self.just_scored = False
+        return hit
+
     def touch_lock(self, moved: bool) -> None:
         if not self.grounded():
             self.lock_until = 0.0
@@ -631,6 +662,7 @@ class Game:
         self.board.lock(self.piece)
         rows = self.board.full_rows()
         if rows:
+            self.just_scored = True
             self.clearing = rows
             self.clear_until = time.monotonic() + FLASH_MS / 1000.0
             self.pending_tspin = tspin
@@ -748,6 +780,65 @@ def fmt_time(ms: int) -> str:
     return f"{minutes}:{seconds:02d}.{hundredths:02d}"
 
 
+def player_name() -> str:
+    name = os.environ.get("USER") or os.environ.get("LOGNAME") or "player"
+    return name[:12]
+
+
+def fmt_when(stamp: str) -> str:
+    try:
+        parsed = time.strptime(stamp.strip(), "%Y-%m-%d %H:%M")
+        return time.strftime("%d %b %H:%M", parsed)
+    except ValueError:
+        return stamp[:14]
+
+
+def volume_bar(volume: int, width: int = 16) -> str:
+    fill = int(round(max(0, min(100, volume)) / 100 * width))
+    return "█" * fill + "░" * (width - fill)
+
+
+def score_line(mode: str, row: dict) -> str:
+    name = str(row.get("name") or player_name())[:12]
+    when = fmt_when(str(row.get("at") or ""))
+    if mode == "sprint":
+        value = fmt_time(int(row.get("time_ms", 0))) if row.get("finished") else "—"
+    else:
+        value = fmt_score(int(row.get("score", 0)))
+    return f"{name:<12}  {value:>8}  {when}"
+
+
+class Ember:
+    def __init__(self, width: int, height: int) -> None:
+        self.w = max(8, width)
+        self.h = max(3, height)
+        self.heat = [0.0] * (self.w * self.h)
+
+    def step(self, now: float) -> None:
+        w, h = self.w, self.h
+        for x in range(w):
+            self.heat[(h - 1) * w + x] = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(now * 9.0 + x * 0.55))
+        for y in range(h - 1):
+            for x in range(w):
+                below = self.heat[(y + 1) * w + x]
+                left = self.heat[(y + 1) * w + max(0, x - 1)]
+                right = self.heat[(y + 1) * w + min(w - 1, x + 1)]
+                self.heat[y * w + x] = (below * 0.46 + left * 0.27 + right * 0.27) * 0.88
+
+    def cell(self, x: int, y: int, theme: Theme) -> tuple[str, tuple[int, int, int]]:
+        value = self.heat[y * self.w + x]
+        index = min(len(FIRE_GLYPHS) - 1, max(0, int(value * len(FIRE_GLYPHS))))
+        if value < 0.18:
+            color = theme.muted
+        elif value < 0.42:
+            color = theme.rgb("red")
+        elif value < 0.7:
+            color = theme.rgb("orange")
+        else:
+            color = theme.rgb("yellow")
+        return FIRE_GLYPHS[index], color
+
+
 def term_size() -> tuple[int, int]:
     try:
         size = os.get_terminal_size()
@@ -791,6 +882,10 @@ class App:
         self.running = True
         self.old_term: Optional[list] = None
         self.buf = bytearray()
+        self.celebrate_mode: Optional[str] = None
+        self.celebrate_until = 0.0
+        self.ember = Ember(CARD_W, 3)
+        self.vol_flash_until = 0.0
 
     def start_mode(self, mode: str) -> None:
         self.game = Game(mode)
@@ -801,6 +896,7 @@ class App:
         if game is None:
             return
         row = {
+            "name": player_name(),
             "score": game.score,
             "lines": game.lines,
             "level": game.level,
@@ -808,7 +904,10 @@ class App:
             "finished": bool(game.won),
             "at": time.strftime("%Y-%m-%d %H:%M"),
         }
-        self.scores.add(game.mode, row)
+        _rank, record = self.scores.add(game.mode, row)
+        if record:
+            self.celebrate_mode = game.mode
+            self.celebrate_until = time.monotonic() + 8.0
 
     def read_keys(self, timeout: float) -> list[str]:
         keys: list[str] = []
@@ -892,9 +991,11 @@ class App:
             elif key in ("vol-", "[", "-"):
                 self.settings.nudge_volume(-5)
                 self.sound.play()
+                self.vol_flash_until = time.monotonic() + 1.2
             elif key in ("vol+", "]", "=", "+"):
                 self.settings.nudge_volume(5)
                 self.sound.play()
+                self.vol_flash_until = time.monotonic() + 1.2
             elif key in ("quit", "esc", "q"):
                 self.running = False
 
@@ -950,8 +1051,10 @@ class App:
                 self.sound.play()
             elif key in ("vol-", "[", "-"):
                 self.settings.nudge_volume(-5)
+                self.vol_flash_until = time.monotonic() + 1.2
             elif key in ("vol+", "]", "=", "+"):
                 self.settings.nudge_volume(5)
+                self.vol_flash_until = time.monotonic() + 1.2
             elif key in ("retry", "r"):
                 self.record_if_needed()
                 self.start_mode(game.mode)
@@ -973,7 +1076,34 @@ class App:
                 game.saved = True
 
     def min_size(self) -> tuple[int, int]:
-        return 56, 24
+        return (64, 26) if self.page == "menu" else (56, 24)
+
+    def celebrating(self, mode: str) -> bool:
+        return self.celebrate_mode == mode and time.monotonic() < self.celebrate_until
+
+    def paint_canvas(self, canvas: list[list[tuple[str, tuple[int, int, int], tuple[int, int, int]]]]) -> list[str]:
+        lines: list[str] = []
+        for y in range(len(canvas)):
+            parts: list[str] = []
+            last_fg = None
+            last_bg = None
+            run: list[str] = []
+
+            def flush() -> None:
+                if not run:
+                    return
+                parts.append(paint("".join(run), last_fg, last_bg))
+                run.clear()
+
+            for ch, fg, bgc in canvas[y]:
+                if fg != last_fg or bgc != last_bg:
+                    flush()
+                    last_fg, last_bg = fg, bgc
+                run.append(ch)
+            flush()
+            parts.append(RESET)
+            lines.append("".join(parts))
+        return lines
 
     def draw(self) -> None:
         self.screen.refresh_size()
@@ -1009,6 +1139,28 @@ class App:
 
     def draw_menu(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
         theme = self.theme
+        card_w = min(CARD_W, max(36, cols - 4))
+        left = max(0, (cols - card_w) // 2)
+        inner_w = card_w - 4
+        selected_mode = MODES[self.menu_index]
+        board = self.scores.rows(selected_mode)
+        fire_on = self.celebrating(selected_mode) and bool(board)
+        board_h = 3 + max(0, len(board) - 1) if fire_on else max(1, len(board))
+        height = 18 + board_h
+        top = max(1, (rows - height) // 2)
+        canvas = [[(" ", theme.fg, bg) for _ in range(cols)] for _ in range(rows)]
+
+        def put(x: int, y: int, ch: str, fg: tuple[int, int, int], bgc: tuple[int, int, int]) -> None:
+            if 0 <= y < rows and 0 <= x < cols:
+                canvas[y][x] = (ch[:1], fg, bgc)
+
+        def put_str(x: int, y: int, text: str, fg: tuple[int, int, int], bgc: tuple[int, int, int]) -> None:
+            for i, ch in enumerate(text):
+                put(x + i, y, ch, fg, bgc)
+
+        def fill(x: int, y: int, width: int, fg: tuple[int, int, int], bgc: tuple[int, int, int]) -> None:
+            put_str(x, y, " " * max(0, width), fg, bgc)
+
         letters = [
             ("T", theme.piece("T")),
             ("E", theme.piece("I")),
@@ -1017,52 +1169,79 @@ class App:
             ("I", theme.piece("J")),
             ("S", theme.piece("S")),
         ]
-        title = "  ".join(paint(ch, color, bg) for ch, color in letters)
-        title_plain = "  ".join(ch for ch, _ in letters)
-        volume = "off" if self.settings.volume <= 0 else str(self.settings.volume)
-        hint = f"enter play   n {self.settings.sound}   [ ] {volume}   q quit"
-        body: list[tuple[str, tuple[int, int, int]]] = []
-        body.append(("", theme.fg))
-        body.append((title_plain, theme.fg))
-        body.append(("", theme.fg))
+        title = "  ".join(ch for ch, _ in letters)
+        title_x = left + max(0, (card_w - len(title)) // 2)
+        for i, (ch, color) in enumerate(letters):
+            put(title_x + i * 3, top, ch, color, bg)
+
+        box_y = top + 2
+        box_h = 10
+        well = theme.well
+        put_str(left, box_y, "╭" + "─" * (card_w - 2) + "╮", theme.muted, well)
+        for row in range(1, box_h - 1):
+            put(left, box_y + row, "│", theme.muted, well)
+            fill(left + 1, box_y + row, card_w - 2, theme.fg, well)
+            put(left + card_w - 1, box_y + row, "│", theme.muted, well)
+        put_str(left, box_y + box_h - 1, "╰" + "─" * (card_w - 2) + "╯", theme.muted, well)
+
         for i, mode in enumerate(MODES):
+            y = box_y + 1 + i * 3
             selected = i == self.menu_index
+            row_bg = mix(theme.selection, well, 0.62) if selected else well
+            ink = theme.accent if selected else theme.fg
+            dim = theme.accent if selected else theme.muted
+            if selected:
+                fill(left + 1, y, card_w - 2, ink, row_bg)
+                fill(left + 1, y + 1, card_w - 2, dim, row_bg)
             mark = "▸ " if selected else "  "
-            best = self.scores.best(mode)
-            if mode == "sprint":
-                best_txt = fmt_time(int(best["time_ms"])) if best and best.get("finished") else "—"
-            else:
-                best_txt = fmt_score(int(best["score"])) if best else "—"
-            line1 = f"{mark}{MODE_LABEL[mode]}"
-            line2 = f"    {MODE_BLURB[mode]}"
-            line3 = f"    best  {best_txt}"
-            color = theme.accent if selected else theme.fg
-            muted = theme.accent if selected else theme.muted
-            body.append((line1, color))
-            body.append((line2, muted))
-            body.append((line3, muted))
-            body.append(("", theme.fg))
-        body.append((hint, theme.muted))
-        top = max(1, (rows - len(body)) // 2)
-        lines: list[str] = []
-        for y in range(rows):
-            idx = y - top
-            if 0 <= idx < len(body):
-                text, color = body[idx]
-                if idx == 1:
-                    pad = max(0, (cols - len(title_plain)) // 2)
-                    row = paint(" " * pad, theme.fg, bg) + title + paint(" " * max(0, cols - pad - len(title_plain)), theme.fg, bg) + RESET
-                    lines.append(row)
-                    continue
-                pad = max(0, (cols - len(text)) // 2)
-                filled = (" " * pad + text)[:cols].ljust(cols)
-                if 0 <= idx < len(body) and body[idx][0].startswith("▸"):
-                    lines.append(paint(filled, color, mix(theme.selection, bg, 0.55)) + RESET)
-                else:
-                    lines.append(paint(filled, color, bg) + RESET)
-            else:
-                lines.append(self.screen.fill_line(cols, bg))
-        return lines
+            put_str(left + 2, y, f"{mark}{MODE_LABEL[mode]}", ink, row_bg)
+            put_str(left + 4, y + 1, MODE_BLURB[mode][:inner_w], dim, row_bg)
+
+        vol_y = box_y + box_h + 1
+        bar = volume_bar(self.settings.volume, 18)
+        percent = "off" if self.settings.volume <= 0 else f"{self.settings.volume}%"
+        vol_label = f"vol  {bar}  {percent}"
+        put_str(left + max(0, (card_w - len(vol_label)) // 2), vol_y, "vol  ", theme.muted, bg)
+        bar_x = left + max(0, (card_w - len(vol_label)) // 2) + 5
+        for i, ch in enumerate(bar):
+            color = theme.accent if ch == "█" else theme.muted
+            put(bar_x + i, vol_y, ch, color, bg)
+        put_str(bar_x + len(bar) + 2, vol_y, percent, theme.fg, bg)
+        sound_label = self.settings.sound
+        put_str(left + max(0, (card_w - len(sound_label)) // 2), vol_y + 1, sound_label, theme.muted, bg)
+
+        board_y = vol_y + 3
+        heading = f"board  ·  {MODE_LABEL[selected_mode]}"
+        put_str(left + max(0, (card_w - len(heading)) // 2), board_y, heading, theme.muted, bg)
+        if fire_on:
+            self.ember.step(time.monotonic())
+            row = board[0]
+            text = score_line(selected_mode, row)
+            text = text[: card_w - 8]
+            box_top = board_y + 1
+            for y in range(3):
+                for x in range(card_w):
+                    glyph, color = self.ember.cell(x, y, theme)
+                    put(left + x, box_top + y, glyph, color, theme.rgb("darker_background"))
+            name = str(row.get("name") or player_name())
+            inner = f" {name} "
+            put_str(left + max(0, (card_w - len(inner)) // 2), box_top, inner, theme.rgb("yellow"), theme.rgb("darker_background"))
+            put_str(left + max(0, (card_w - len(text)) // 2), box_top + 1, text, theme.fg, theme.rgb("darker_background"))
+            extra_y = box_top + 3
+            for index, extra in enumerate(board[1:]):
+                line = f"  {score_line(selected_mode, extra)}"
+                put_str(left + 2, extra_y + index, line[:card_w - 2], theme.muted, bg)
+        elif board:
+            for index, row in enumerate(board):
+                line = f"  {score_line(selected_mode, row)}"
+                put_str(left + 2, board_y + 1 + index, line[:card_w - 2], theme.fg if index == 0 else theme.muted, bg)
+        else:
+            empty = "no games yet"
+            put_str(left + max(0, (card_w - len(empty)) // 2), board_y + 1, empty, theme.muted, bg)
+
+        hint = "enter play    n sound    [ ] vol    q quit"
+        put_str(left + max(0, (card_w - len(hint)) // 2), min(rows - 1, board_y + board_h + 2), hint, theme.muted, bg)
+        return self.paint_canvas(canvas)
 
     def draw_play(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
         game = self.game
@@ -1166,7 +1345,11 @@ class App:
         elif game.mode == "sprint":
             put_str(left0, well_y + 14, "TIME", theme.muted, bg)
             put_str(left0, well_y + 15, fmt_time(game.clock_ms()), theme.accent, bg)
-        if game.banner and time.monotonic() < game.banner_until:
+        if time.monotonic() < self.vol_flash_until:
+            bar = volume_bar(self.settings.volume, 10)
+            percent = "off" if self.settings.volume <= 0 else f"{self.settings.volume}%"
+            put_str(left0, well_y + 17, f"{bar} {percent}", theme.accent, bg)
+        elif game.banner and time.monotonic() < game.banner_until:
             put_str(left0, well_y + 17, game.banner, theme.accent, bg)
 
         put_str(right0, well_y - 1, "NEXT", theme.muted, bg)
@@ -1178,51 +1361,48 @@ class App:
         put_str(max(0, (cols - len(help_txt)) // 2), help_y, help_txt, theme.muted, bg)
 
         overlay = ""
+        record = self.celebrating(game.mode)
         if game.paused:
             overlay = "PAUSED"
             sub = "p resume   r retry   q menu"
         elif not game.alive:
             if game.mode == "sprint" and game.won:
-                overlay = "CLEARED"
+                overlay = "RECORD" if record else "CLEARED"
                 sub = f"{fmt_time(game.clock_ms())}    enter retry   q menu"
             elif game.mode == "ultra":
-                overlay = "TIME UP" if game.won else "TOP OUT"
+                overlay = "RECORD" if record else ("TIME UP" if game.won else "TOP OUT")
                 sub = f"{fmt_score(game.score)}    enter retry   q menu"
             else:
-                overlay = "GAME OVER"
+                overlay = "RECORD" if record else "GAME OVER"
                 sub = f"{fmt_score(game.score)}    enter retry   q menu"
         if overlay:
-            box_w = max(len(overlay), len(sub)) + 6
-            box_h = 5
+            name = player_name()
+            box_w = max(len(overlay), len(sub), len(name) + 4) + 8
+            box_h = 7 if record else 5
             ox = well0 + (well_w - box_w) // 2
             oy = well_y + (ROWS - box_h) // 2
             panel = mix(theme.rgb("darker_background"), theme.selection, 0.55)
-            for yy in range(box_h):
-                for xx in range(box_w):
-                    put(ox + xx, oy + yy, " ", theme.fg, panel)
-            put_str(ox + (box_w - len(overlay)) // 2, oy + 1, overlay, theme.accent, panel)
-            put_str(ox + (box_w - len(sub)) // 2, oy + 3, sub, theme.fg, panel)
+            if record:
+                self.ember.step(time.monotonic())
+                for yy in range(box_h):
+                    for xx in range(box_w):
+                        edge = yy in (0, box_h - 1) or xx < 2 or xx >= box_w - 2
+                        if edge:
+                            glyph, color = self.ember.cell(xx % self.ember.w, min(yy, self.ember.h - 1), theme)
+                            put(ox + xx, oy + yy, glyph, color, theme.rgb("darker_background"))
+                        else:
+                            put(ox + xx, oy + yy, " ", theme.fg, panel)
+                put_str(ox + (box_w - len(overlay)) // 2, oy + 1, overlay, theme.rgb("yellow"), panel)
+                put_str(ox + (box_w - len(name)) // 2, oy + 3, name, theme.fg, panel)
+                put_str(ox + (box_w - len(sub)) // 2, oy + 5, sub, theme.muted, panel)
+            else:
+                for yy in range(box_h):
+                    for xx in range(box_w):
+                        put(ox + xx, oy + yy, " ", theme.fg, panel)
+                put_str(ox + (box_w - len(overlay)) // 2, oy + 1, overlay, theme.accent, panel)
+                put_str(ox + (box_w - len(sub)) // 2, oy + 3, sub, theme.fg, panel)
 
-        lines: list[str] = []
-        for y in range(rows):
-            parts: list[str] = []
-            last_fg = None
-            last_bg = None
-            run = []
-            def flush() -> None:
-                if not run:
-                    return
-                parts.append(paint("".join(run), last_fg, last_bg))
-                run.clear()
-            for ch, fg, bgc in canvas[y]:
-                if fg != last_fg or bgc != last_bg:
-                    flush()
-                    last_fg, last_bg = fg, bgc
-                run.append(ch)
-            flush()
-            parts.append(RESET)
-            lines.append("".join(parts))
-        return lines
+        return self.paint_canvas(canvas)
 
     def setup_term(self) -> None:
         self.old_term = termios.tcgetattr(sys.stdin)
@@ -1260,6 +1440,8 @@ class App:
                     self.game.tick(now)
                     if self.game.consume_land():
                         self.sound.play()
+                    if self.game.consume_score():
+                        self.sound.play("clear")
                     if not self.game.alive and not self.game.saved:
                         self.record_score()
                         self.game.saved = True
@@ -1281,7 +1463,7 @@ def parse_args(argv: list[str]) -> dict:
         item = args.pop(0)
         if item in ("-h", "--help"):
             sys.stdout.write(
-                "usage: omarchy-tetris [--preview] [--sound thock|click|chip|hush] [--volume 0-100]\n"
+                "usage: omarchy-tetris [--preview] [--sound thock|click|chip|hush|clear] [--volume 0-100]\n"
             )
             raise SystemExit(0)
         if item == "--preview":
@@ -1300,8 +1482,8 @@ def main() -> int:
     opts = parse_args(sys.argv)
     if opts["preview"]:
         settings = Settings()
-        if opts["sound"]:
-            settings.sound = opts["sound"] if opts["sound"] in SOUND_VOICES else settings.sound
+        if opts["sound"] in SOUND_VOICES or opts["sound"] == "clear":
+            settings.sound = opts["sound"]
         if opts["volume"] is not None:
             try:
                 settings.volume = max(0, min(100, int(opts["volume"])))
