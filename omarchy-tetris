@@ -470,6 +470,13 @@ class Sound:
     def path_for(self, voice: str) -> Path:
         return ROOT / "sounds" / f"{voice}.wav"
 
+    def clear_voice(self, lines: int) -> str:
+        n = min(7, max(1, int(lines)))
+        name = f"clear-{n}"
+        if self.path_for(name).is_file():
+            return name
+        return "clear"
+
     def play(self, voice: Optional[str] = None) -> None:
         if self.player is None or self.settings.volume <= 0:
             return
@@ -520,7 +527,7 @@ class Music:
     def gain(self) -> float:
         if self.settings.music_muted or self.settings.volume <= 0:
             return 0.0
-        return max(0.16, min(0.46, 0.14 + self.settings.volume / 100.0 * 0.30))
+        return max(0.28, min(0.78, 0.22 + self.settings.volume / 100.0 * 0.52))
 
     def start(self) -> None:
         if self.running:
@@ -669,6 +676,7 @@ class Music:
                     "1.0",
                     "--media-role",
                     "Music",
+                    "-",
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
@@ -723,6 +731,14 @@ class Music:
                 if self.child is None or self.child.stdin is None:
                     time.sleep(0.2)
                     continue
+                try:
+                    for _ in range(6):
+                        self.child.stdin.write(self._scale(self._read(self.CHUNK), self.gain()))
+                    self.child.stdin.flush()
+                except (BrokenPipeError, OSError):
+                    self._kill()
+                    time.sleep(0.05)
+                    continue
             chunk = self._scale(self._read(self.CHUNK), self.gain())
             try:
                 self.child.stdin.write(chunk)
@@ -763,7 +779,7 @@ class Game:
         self.pause_started = 0.0
         self.was_grounded = False
         self.just_landed = False
-        self.just_scored = False
+        self.just_scored = 0
         self.piece = self.spawn()
 
     def spawn_piece(self, kind: str) -> Optional[Piece]:
@@ -866,6 +882,7 @@ class Game:
             dist += 1
         self.score += dist * 2
         self.lock_piece()
+        self.just_landed = True
 
     def soft_drop(self) -> None:
         if self.try_move(0, 1):
@@ -911,9 +928,9 @@ class Game:
         self.just_landed = False
         return hit
 
-    def consume_score(self) -> bool:
-        hit = self.just_scored
-        self.just_scored = False
+    def consume_score(self) -> int:
+        hit = int(self.just_scored or 0)
+        self.just_scored = 0
         return hit
 
     def touch_lock(self, moved: bool) -> None:
@@ -933,7 +950,7 @@ class Game:
         self.board.lock(self.piece)
         rows = self.board.full_rows()
         if rows:
-            self.just_scored = True
+            self.just_scored = len(rows)
             self.clearing = rows
             self.clear_until = time.monotonic() + FLASH_MS / 1000.0
             self.pending_tspin = tspin
@@ -1430,8 +1447,7 @@ class App:
         inner_w = card_w - 4
         selected_mode = MODES[self.menu_index]
         board = self.scores.rows(selected_mode)
-        fire_on = bool(board)
-        board_h = 3 + max(0, len(board) - 1) if fire_on else max(1, len(board))
+        board_h = max(1, len(board))
         height = 18 + board_h
         top = max(1, (rows - height) // 2)
         canvas = [[(" ", theme.fg, bg) for _ in range(cols)] for _ in range(rows)]
@@ -1501,33 +1517,17 @@ class App:
         board_y = vol_y + 3
         heading = f"board  ·  {MODE_LABEL[selected_mode]}"
         put_str(left + max(0, (card_w - len(heading)) // 2), board_y, heading, theme.muted, bg)
-        if fire_on:
-            self.ember.step(time.monotonic())
-            row = board[0]
-            text = score_line(selected_mode, row)[: max(8, card_w - 10)]
-            name = str(row.get("name") or player_name())
-            box_top = board_y + 1
-            ash = theme.rgb("darker_background")
-            for y in range(3):
-                for x in range(card_w):
-                    glyph, color = self.ember.cell(x, y, theme)
-                    put(left + x, box_top + y, glyph, color, ash)
-            label = f" 1  {name} "
-            put_str(left + 3, box_top, label[: card_w - 6], theme.rgb("yellow"), ash)
-            put_str(left + 3, box_top + 1, f"    {text}"[: card_w - 6], theme.fg, ash)
-            extra_y = box_top + 3
-            for index, extra in enumerate(board[1:]):
-                line = f"  {index + 2}  {score_line(selected_mode, extra)}"
-                put_str(left + 2, extra_y + index, line[:card_w - 2], theme.muted, bg)
-        elif board:
+        if board:
             for index, row in enumerate(board):
-                line = f"  {score_line(selected_mode, row)}"
-                put_str(left + 2, board_y + 1 + index, line[:card_w - 2], theme.fg if index == 0 else theme.muted, bg)
+                mark = "♔ " if index == 0 else f"{index + 1} "
+                line = f"  {mark}{score_line(selected_mode, row)}"
+                color = theme.accent if index == 0 else theme.muted
+                put_str(left + 2, board_y + 1 + index, line[: card_w - 2], color, bg)
         else:
             empty = "no games yet"
             put_str(left + max(0, (card_w - len(empty)) // 2), board_y + 1, empty, theme.muted, bg)
 
-        hint = "enter play   t theme   m mute   [ ] vol   q quit"
+        hint = "enter play   t music theme   m mute   [ ] vol   q quit"
         put_str(left + max(0, (card_w - len(hint)) // 2), min(rows - 1, board_y + board_h + 2), hint, theme.muted, bg)
         return self.paint_canvas(canvas)
 
@@ -1650,7 +1650,7 @@ class App:
             mini(kind, right0, well_y + i * 4)
 
         help_y = min(rows - 1, well_y + ROWS + 1)
-        help_txt = "←→ move   space drop   t theme   m mute   [ ] vol   p pause"
+        help_txt = "←→ move   space drop   t music theme   m mute   [ ] vol   p pause"
         put_str(max(0, (cols - len(help_txt)) // 2), help_y, help_txt, theme.muted, bg)
 
         overlay = ""
@@ -1669,31 +1669,17 @@ class App:
                 overlay = "RECORD" if record else "GAME OVER"
                 sub = f"{fmt_score(game.score)}    enter retry   q menu"
         if overlay:
-            name = player_name()
-            box_w = max(len(overlay), len(sub), len(name) + 4) + 8
-            box_h = 7 if record else 5
+            title = f"♔ {overlay}" if record else overlay
+            box_w = max(len(title), len(sub)) + 6
+            box_h = 5
             ox = well0 + (well_w - box_w) // 2
             oy = well_y + (ROWS - box_h) // 2
             panel = mix(theme.rgb("darker_background"), theme.selection, 0.55)
-            if record:
-                self.ember.step(time.monotonic())
-                for yy in range(box_h):
-                    for xx in range(box_w):
-                        edge = yy in (0, box_h - 1) or xx < 2 or xx >= box_w - 2
-                        if edge:
-                            glyph, color = self.ember.cell(xx % self.ember.w, min(yy, self.ember.h - 1), theme)
-                            put(ox + xx, oy + yy, glyph, color, theme.rgb("darker_background"))
-                        else:
-                            put(ox + xx, oy + yy, " ", theme.fg, panel)
-                put_str(ox + (box_w - len(overlay)) // 2, oy + 1, overlay, theme.rgb("yellow"), panel)
-                put_str(ox + (box_w - len(name)) // 2, oy + 3, name, theme.fg, panel)
-                put_str(ox + (box_w - len(sub)) // 2, oy + 5, sub, theme.muted, panel)
-            else:
-                for yy in range(box_h):
-                    for xx in range(box_w):
-                        put(ox + xx, oy + yy, " ", theme.fg, panel)
-                put_str(ox + (box_w - len(overlay)) // 2, oy + 1, overlay, theme.accent, panel)
-                put_str(ox + (box_w - len(sub)) // 2, oy + 3, sub, theme.fg, panel)
+            for yy in range(box_h):
+                for xx in range(box_w):
+                    put(ox + xx, oy + yy, " ", theme.fg, panel)
+            put_str(ox + (box_w - len(title)) // 2, oy + 1, title, theme.accent, panel)
+            put_str(ox + (box_w - len(sub)) // 2, oy + 3, sub, theme.fg, panel)
 
         return self.paint_canvas(canvas)
 
@@ -1734,8 +1720,9 @@ class App:
                     self.game.tick(now)
                     if self.game.consume_land():
                         self.sound.play()
-                    if self.game.consume_score():
-                        self.sound.play("clear")
+                    cleared = self.game.consume_score()
+                    if cleared:
+                        self.sound.play(self.sound.clear_voice(cleared))
                     if not self.game.alive and not self.game.saved:
                         self.record_score()
                         self.game.saved = True

@@ -42,7 +42,7 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | r | Retry |
 | q | Menu, or quit from the menu |
 
-Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use one shared chime. Music themes are **piano**, **strings**, and **music box**. Mute music from the panel or with `m`; landing and score sounds stay on. Settings live in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
+Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use a chime that rises with 2–7 lines. Music themes are **piano**, **strings**, and **music box**. Mute music from the panel or with `m`; landing and score sounds stay on. Settings live in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
 
 ## Music
 

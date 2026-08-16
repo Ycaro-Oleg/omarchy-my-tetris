@@ -79,17 +79,20 @@ def hush():
     return samples
 
 
-def clear():
+def clear(spread=1):
     samples = []
-    n = int(RATE * 0.17)
+    n = int(RATE * (0.15 + 0.012 * spread))
+    lift = 1.0 + (spread - 1) * 0.12
+    first = 523 * lift
+    second = 784 * lift
     for i in range(n):
         t = i / RATE
-        a = math.sin(2 * math.pi * 523 * t) * math.exp(-t * 12) * 0.34
+        a = math.sin(2 * math.pi * first * t) * math.exp(-t * 12) * 0.34
         b = 0.0
-        if t > 0.045:
-            u = t - 0.045
-            b = math.sin(2 * math.pi * 784 * t) * math.exp(-u * 11) * 0.30
-        click = math.sin(2 * math.pi * 1180 * t) * math.exp(-t * 70) * 0.08
+        if t > 0.04:
+            u = t - 0.04
+            b = math.sin(2 * math.pi * second * t) * math.exp(-u * 11) * 0.30
+        click = math.sin(2 * math.pi * 1180 * lift * t) * math.exp(-t * 70) * 0.08
         samples.append(quantize((a + b + click) * (1.0 - math.exp(-t * 180)), 7))
     return samples
 
@@ -99,4 +102,6 @@ if __name__ == "__main__":
     write_wav("click.wav", click())
     write_wav("chip.wav", chip())
     write_wav("hush.wav", hush())
-    write_wav("clear.wav", clear())
+    write_wav("clear.wav", clear(1))
+    for n in range(1, 8):
+        write_wav(f"clear-{n}.wav", clear(n))
