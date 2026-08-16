@@ -79,87 +79,20 @@ def hush():
     return samples
 
 
-def square(freq, t):
-    return 1.0 if math.sin(2 * math.pi * freq * t) >= 0 else -1.0
-
-
-def tri(freq, t):
-    return 2 * abs(2 * ((t * freq) % 1.0) - 1) - 1
-
-
-def note_env(t, length, attack=0.012, release=0.08):
-    if t < 0 or t > length:
-        return 0.0
-    a = min(1.0, t / attack)
-    r = 1.0 if t < length - release else max(0.0, (length - t) / release)
-    return a * r
-
-
-def music():
-    rate = 22050
-    bpm = 92
-    beat = 60.0 / bpm
-    melody = [
-        (659.25, 1.0),
-        (783.99, 1.0),
-        (880.00, 1.5),
-        (783.99, 0.5),
-        (659.25, 1.0),
-        (587.33, 1.0),
-        (523.25, 2.0),
-        (587.33, 1.0),
-        (659.25, 1.0),
-        (783.99, 1.5),
-        (880.00, 0.5),
-        (987.77, 1.0),
-        (880.00, 1.0),
-        (783.99, 2.0),
-        (659.25, 1.0),
-        (523.25, 3.0),
-    ]
-    bass = [
-        (130.81, 2.0),
-        (196.00, 2.0),
-        (174.61, 2.0),
-        (196.00, 2.0),
-        (130.81, 2.0),
-        (164.81, 2.0),
-        (174.61, 2.0),
-        (196.00, 2.0),
-    ]
-    total = sum(length for _freq, length in melody) * beat
-    n = int(rate * total)
+def clear(spread=1):
     samples = []
-    for i in range(n):
-        t = i / rate
-        lead = 0.0
-        cursor = 0.0
-        for freq, length in melody:
-            dur = length * beat
-            lead += square(freq, t) * note_env(t - cursor, dur) * 0.045
-            cursor += dur
-        pulse = 0.0
-        cursor = 0.0
-        for freq, length in bass:
-            dur = length * beat
-            pulse += tri(freq, t) * note_env(t - cursor, dur, 0.02, 0.12) * 0.07
-            cursor += dur
-        pad = tri(196.00, t) * 0.018 + tri(261.63, t) * 0.012
-        samples.append(quantize(lead + pulse + pad, 7))
-    return samples
-
-
-def clear():
-    samples = []
-    n = int(RATE * 0.17)
+    n = int(RATE * (0.15 + 0.012 * spread))
+    lift = 1.0 + (spread - 1) * 0.12
+    first = 523 * lift
+    second = 784 * lift
     for i in range(n):
         t = i / RATE
-        a = math.sin(2 * math.pi * 523 * t) * math.exp(-t * 12) * 0.34
+        a = math.sin(2 * math.pi * first * t) * math.exp(-t * 12) * 0.34
         b = 0.0
-        if t > 0.045:
-            u = t - 0.045
-            b = math.sin(2 * math.pi * 784 * t) * math.exp(-u * 11) * 0.30
-        click = math.sin(2 * math.pi * 1180 * t) * math.exp(-t * 70) * 0.08
+        if t > 0.04:
+            u = t - 0.04
+            b = math.sin(2 * math.pi * second * t) * math.exp(-u * 11) * 0.30
+        click = math.sin(2 * math.pi * 1180 * lift * t) * math.exp(-t * 70) * 0.08
         samples.append(quantize((a + b + click) * (1.0 - math.exp(-t * 180)), 7))
     return samples
 
@@ -169,5 +102,6 @@ if __name__ == "__main__":
     write_wav("click.wav", click())
     write_wav("chip.wav", chip())
     write_wav("hush.wav", hush())
-    write_wav("clear.wav", clear())
-    write_wav("music.wav", music())
+    write_wav("clear.wav", clear(1))
+    for n in range(1, 8):
+        write_wav(f"clear-{n}.wav", clear(n))

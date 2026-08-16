@@ -1,6 +1,6 @@
 # Tetris
 
-A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows the theme you already have selected. Pieces are drawn as little squares. A landing sound plays when a piece first sits on the stack, a chime plays when lines clear, and a quiet 8-bit loop sits under the game. All of that follows the volume bar.
+A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows the theme you already have selected. Pieces are drawn as little squares. A landing sound plays when a piece first sits on the stack, a chime plays when lines clear, and one of three Korobeiniki arrangements loops underneath. Game sounds and music have separate volume bars. `m` mutes only the music.
 
 The game opens as a normal tiled window, so it joins whatever layout you are already using. Move and resize it with your usual keys.
 
@@ -35,12 +35,21 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | Space | Hard drop |
 | c | Hold |
 | n | Next landing sound |
-| [ ] | Volume |
+| t | Next music theme |
+| m | Mute music only |
+| [ ] | Game volume |
+| - = | Music volume |
 | p / Esc | Pause |
 | r | Retry |
 | q | Menu, or quit from the menu |
 
-Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use one shared chime. Quiet 8-bit music loops in the background. Volume and voice are shared between the panel and the game in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
+Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use a chime that rises with 2–7 lines. Music themes are **piano**, **strings**, and **music box**. Mute music from the panel or with `m`; landing and score sounds stay on. Game volume and music volume are separate. Settings live in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
+
+## Music
+
+The three themes are *Tetris Theme – Korobeiniki – Rearranged* by [Gregor Quendel](https://www.gregorquendel.com), from [ClassicalS.de](https://www.classicals.de/tetris-theme). © 2024 Gregor Quendel. Licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
+
+That license lets this free plugin share and loop the recordings if the credit stays with them. It does **not** allow selling the plugin or putting the tracks in a paid product. For that, buy a [commercial license](https://www.classicals.de/). The plugin only trims silence and crossfades the loop point; see `sounds/themes/NOTICE.md`.
 
 ## Configure
 
