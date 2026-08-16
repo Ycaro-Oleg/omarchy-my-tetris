@@ -34,6 +34,8 @@ CONFIG_PATH = Path.home() / ".local/state/omarchy/tetris.json"
 SOUND_VOICES = ("thock", "click", "chip", "hush")
 MUSIC_THEMES = ("piano", "strings", "music-box")
 MUSIC_LABEL = {"piano": "piano", "strings": "strings", "music-box": "music box"}
+LOOKS = ("nes", "flat", "brick", "blocks")
+LOOK_LABEL = {"nes": "NES", "flat": "flat", "brick": "brick", "blocks": "blocks"}
 CARD_W = 46
 BOARD_ROWS = 4
 
@@ -230,6 +232,56 @@ class Theme:
         }
         return self.rgb(mapping.get(name, "accent"))
 
+    @property
+    def grout(self) -> tuple[int, int, int]:
+        return mix((0, 0, 0), self.well, 0.55)
+
+
+def paint_mino(
+    put,
+    theme: Theme,
+    look: str,
+    x: int,
+    y: int,
+    color: tuple[int, int, int],
+    ghost: bool = False,
+    filled: bool = True,
+) -> None:
+    if not filled:
+        put(x, y, " ", theme.fg, color)
+        put(x + 1, y, " ", theme.fg, color)
+        return
+    style = look if look in LOOKS else "nes"
+    if style == "flat":
+        face = mix(color, theme.well, 0.3) if ghost else color
+        put(x, y, " ", theme.fg, face)
+        put(x + 1, y, " ", theme.fg, face)
+        return
+    if style == "brick":
+        if ghost:
+            dust = mix(color, theme.well, 0.28)
+            put(x, y, "▒", dust, theme.well)
+            put(x + 1, y, "▒", dust, theme.well)
+            return
+        face = mix((255, 255, 255), color, 0.16)
+        put(x, y, "█", face, theme.grout)
+        put(x + 1, y, "▌", color, theme.grout)
+        return
+    if style == "blocks":
+        face = mix(color, theme.well, 0.35) if ghost else color
+        put(x, y, "█", face, theme.well)
+        put(x + 1, y, "█", face, theme.well)
+        return
+    if ghost:
+        ink = mix(color, theme.well, 0.42)
+        put(x, y, "▛", ink, theme.well)
+        put(x + 1, y, "▟", ink, theme.well)
+        return
+    shine = mix((255, 255, 255), color, 0.52)
+    shade = mix((0, 0, 0), color, 0.4)
+    put(x, y, "▛", shine, color)
+    put(x + 1, y, "▟", shade, color)
+
 
 def gravity_ms(level: int) -> int:
     n = max(1, level)
@@ -387,6 +439,7 @@ class Settings:
         self.sound_volume = 55
         self.music_volume = 15
         self.theme = "piano"
+        self.look = "nes"
         self.music_muted = False
         self.mtime = -1.0
         self.load()
@@ -409,6 +462,8 @@ class Settings:
         self.sound = voice if voice in SOUND_VOICES else "thock"
         theme = str(raw.get("theme", "piano"))
         self.theme = theme if theme in MUSIC_THEMES else "piano"
+        look = str(raw.get("look", "nes"))
+        self.look = look if look in LOOKS else "nes"
         self.music_muted = bool(raw.get("music_muted", False))
         legacy = raw.get("volume")
         self.sound_volume = self._clamp_vol(raw.get("sound_volume", legacy if legacy is not None else 55), 55)
@@ -431,6 +486,7 @@ class Settings:
                     "sound_volume": self.sound_volume,
                     "music_volume": self.music_volume,
                     "theme": self.theme,
+                    "look": self.look,
                     "music_muted": self.music_muted,
                 },
                 indent=2,
@@ -455,6 +511,12 @@ class Settings:
         self.theme = MUSIC_THEMES[(index + 1) % len(MUSIC_THEMES)]
         self.save()
         return self.theme
+
+    def cycle_look(self, delta: int = 1) -> str:
+        index = LOOKS.index(self.look) if self.look in LOOKS else 0
+        self.look = LOOKS[(index + delta) % len(LOOKS)]
+        self.save()
+        return self.look
 
     def toggle_music(self) -> bool:
         self.music_muted = not self.music_muted
@@ -1193,6 +1255,7 @@ class App:
                     "k": "up",
                     "n": "sound",
                     "t": "theme",
+                    "b": "look",
                     "m": "mute",
                     "[": "sfx-",
                     "]": "sfx+",
@@ -1223,6 +1286,8 @@ class App:
                 self.sound.play()
             elif key in ("theme", "t"):
                 self.settings.cycle_theme()
+            elif key in ("look", "b", "left", "right"):
+                self.settings.cycle_look(-1 if key == "left" else 1)
             elif key in ("mute", "m"):
                 self.settings.toggle_music()
             elif key in ("sfx-", "["):
@@ -1272,6 +1337,8 @@ class App:
             if game.paused:
                 if key in ("theme", "t"):
                     self.settings.cycle_theme()
+                elif key in ("look", "b"):
+                    self.settings.cycle_look()
                 elif key in ("mute", "m"):
                     self.settings.toggle_music()
                 elif key in ("quit", "q"):
@@ -1302,6 +1369,8 @@ class App:
                 self.sound.play()
             elif key in ("theme", "t"):
                 self.settings.cycle_theme()
+            elif key in ("look", "b"):
+                self.settings.cycle_look()
             elif key in ("mute", "m"):
                 self.settings.toggle_music()
             elif key in ("sfx-", "["):
@@ -1341,7 +1410,7 @@ class App:
                 game.saved = True
 
     def min_size(self) -> tuple[int, int]:
-        return (64, 26) if self.page == "menu" else (56, 24)
+        return (64, 28) if self.page == "menu" else (56, 24)
 
     def celebrating(self, mode: str) -> bool:
         return self.celebrate_mode == mode and time.monotonic() < self.celebrate_until
@@ -1410,7 +1479,7 @@ class App:
         selected_mode = MODES[self.menu_index]
         board = self.scores.rows(selected_mode)
         board_h = max(1, len(board))
-        height = 18 + board_h
+        height = 21 + board_h
         top = max(1, (rows - height) // 2)
         canvas = [[(" ", theme.fg, bg) for _ in range(cols)] for _ in range(rows)]
 
@@ -1483,7 +1552,34 @@ class App:
         extra = f"{self.settings.sound}   {state}"
         put_str(left + max(0, (card_w - len(extra)) // 2), vol_y + 2, extra, theme.muted, bg)
 
-        board_y = vol_y + 4
+        look = self.settings.look if self.settings.look in LOOKS else "nes"
+        look_y = vol_y + 4
+        put_str(left + 2, look_y, "look  ", theme.muted, bg)
+        put_str(left + 8, look_y, f"◂ {LOOK_LABEL[look]} ▸", theme.accent, bg)
+        blocks = SHAPES["T"][0]
+        minx = min(b[0] for b in blocks)
+        miny = min(b[1] for b in blocks)
+        maxx = max(b[0] for b in blocks)
+        preview_w = (maxx - minx + 1) * CELL
+        sx = left + card_w - 2 - preview_w
+        for row in range(2):
+            fill(sx - 1, look_y + row, preview_w + 2, theme.fg, well)
+        for cx, cy in blocks:
+            paint_mino(
+                put,
+                theme,
+                look,
+                sx + (cx - minx) * CELL,
+                look_y + (cy - miny),
+                theme.piece("T"),
+            )
+        strip_x = left + 2
+        strip_y = look_y + 1
+        if sx - strip_x >= 7 * CELL + 2:
+            for i, kind in enumerate("IOTSZJL"):
+                paint_mino(put, theme, look, strip_x + i * CELL, strip_y, theme.piece(kind))
+
+        board_y = look_y + 3
         heading = f"board  ·  {MODE_LABEL[selected_mode]}"
         put_str(left + max(0, (card_w - len(heading)) // 2), board_y, heading, theme.muted, bg)
         if board:
@@ -1496,7 +1592,7 @@ class App:
             empty = "no games yet"
             put_str(left + max(0, (card_w - len(empty)) // 2), board_y + 1, empty, theme.muted, bg)
 
-        hint = "enter   t music theme   m mute   [ ] game   - = music   q"
+        hint = "enter   ←→ look   t music   m mute   [ ] game   - = music   q"
         put_str(left + max(0, (card_w - len(hint)) // 2), min(rows - 1, board_y + board_h + 2), hint, theme.muted, bg)
         return self.paint_canvas(canvas)
 
@@ -1523,10 +1619,10 @@ class App:
             for i, ch in enumerate(text):
                 put(x + i, y, ch, fg, bgc)
 
+        look = self.settings.look if self.settings.look in LOOKS else "nes"
+
         def put_cell(x: int, y: int, color: tuple[int, int, int], ghost: bool = False, filled: bool = True) -> None:
-            face = mix(color, theme.well, 0.3) if ghost else color
-            put(x, y, " ", theme.fg, face)
-            put(x + 1, y, " ", theme.fg, face)
+            paint_mino(put, theme, look, x, y, color, ghost=ghost, filled=filled)
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)
@@ -1616,7 +1712,7 @@ class App:
             mini(kind, right0, well_y + i * 4)
 
         help_y = min(rows - 1, well_y + ROWS + 1)
-        help_txt = "←→ move   space drop   [ ] game   - = music   m mute   p pause"
+        help_txt = "←→ move   space drop   b look   [ ] game   - = music   m mute   p pause"
         put_str(max(0, (cols - len(help_txt)) // 2), help_y, help_txt, theme.muted, bg)
 
         overlay = ""

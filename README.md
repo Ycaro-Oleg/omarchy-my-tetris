@@ -1,6 +1,6 @@
 # Tetris
 
-A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows the theme you already have selected. Pieces are drawn as little squares. A landing sound plays when a piece first sits on the stack, a chime plays when lines clear, and one of three Korobeiniki arrangements loops underneath. Game sounds and music have separate volume bars. `m` mutes only the music.
+A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows the theme you already have selected. Pieces default to NES-style beveled tiles. Cycle looks on the menu with ← → (or `b` in a game) and a T-piece preview updates as you go: **NES**, **flat**, **brick**, and **blocks**. A landing sound plays when a piece first sits on the stack, a chime plays when lines clear, and one of three Korobeiniki arrangements loops underneath. Game sounds and music have separate volume bars. `m` mutes only the music.
 
 The game opens as a normal tiled window, so it joins whatever layout you are already using. Move and resize it with your usual keys.
 
@@ -36,6 +36,7 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | c | Hold |
 | n | Next landing sound |
 | t | Next music theme |
+| b / ← → | Next mino look (arrows on the menu) |
 | m | Mute music only |
 | [ ] | Game volume |
 | - = | Music volume |
@@ -43,7 +44,7 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | r | Retry |
 | q | Menu, or quit from the menu |
 
-Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use a chime that rises with 2–7 lines. Music themes are **piano**, **strings**, and **music box**. Mute music from the panel or with `m`; landing and score sounds stay on. Game volume and music volume are separate. Settings live in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
+Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use a chime that rises with 2–7 lines. Music themes are **piano**, **strings**, and **music box**. Mino looks are **NES**, **flat**, **brick**, and **blocks**. Mute music from the panel or with `m`; landing and score sounds stay on. Game volume and music volume are separate. Settings live in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
 
 ## Music
 

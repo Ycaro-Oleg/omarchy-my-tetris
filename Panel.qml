@@ -23,6 +23,7 @@ Panel {
   property int soundVolume: 55
   property int musicVolume: 15
   property string theme: "piano"
+  property string look: "nes"
   property bool musicMuted: false
   readonly property var soundOptions: [
     { value: "thock", label: "Thock" },
@@ -34,6 +35,12 @@ Panel {
     { value: "piano", label: "Piano" },
     { value: "strings", label: "Strings" },
     { value: "music-box", label: "Box" }
+  ]
+  readonly property var lookOptions: [
+    { value: "nes", label: "NES" },
+    { value: "flat", label: "Flat" },
+    { value: "brick", label: "Brick" },
+    { value: "blocks", label: "Blocks" }
   ]
 
   function open() {
@@ -76,6 +83,11 @@ Panel {
     for (var j = 0; j < themeOptions.length; j++)
       if (themeOptions[j].value === nextTheme) themeOk = true
     root.theme = themeOk ? nextTheme : "piano"
+    var nextLook = String(data.look || "nes")
+    var lookOk = false
+    for (var k = 0; k < lookOptions.length; k++)
+      if (lookOptions[k].value === nextLook) lookOk = true
+    root.look = lookOk ? nextLook : "nes"
     root.musicMuted = data.music_muted === true
     var legacy = parseInt(data.volume, 10)
     var nextSoundVol = parseInt(data.sound_volume, 10)
@@ -91,6 +103,7 @@ Panel {
       sound_volume: root.soundVolume,
       music_volume: root.musicVolume,
       theme: root.theme,
+      look: root.look,
       music_muted: root.musicMuted
     }, null, 2) + "\n"
     configFile.setText(payload)
@@ -163,6 +176,26 @@ Panel {
         }
 
         PanelSeparator { foreground: root.contentForeground }
+
+        PanelSectionHeader {
+          text: "Look"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+        }
+
+        ButtonGroup {
+          width: parent.width
+          options: root.lookOptions
+          value: root.look
+          foreground: root.contentForeground
+          background: root.bar ? root.bar.background : Color.background
+          accent: Color.accent
+          fontFamily: root.contentFontFamily
+          onChanged: function(next) {
+            root.look = next
+            root.persist()
+          }
+        }
 
         PanelSectionHeader {
           text: "Landing"
