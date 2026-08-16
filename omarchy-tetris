@@ -515,7 +515,6 @@ class Music:
     RATE = 44100
     CHANNELS = 2
     FRAME = 4
-    FADE_MS = 1100
     CHUNK = 4096 * 4
 
     def __init__(self, settings: Settings) -> None:
@@ -526,7 +525,6 @@ class Music:
         self.pcm = b""
         self.loaded = ""
         self.cursor = 0
-        self.wrap_to = 0
         self.lock = threading.Lock()
 
     def path_for(self, theme: str) -> Path:
@@ -604,53 +602,6 @@ class Music:
             return b""
         return proc.stdout
 
-    def _trim(self, pcm: bytes) -> bytes:
-        frame = self.FRAME
-        n = len(pcm) // frame
-        if n < self.RATE:
-            return pcm
-        window = 1024
-        threshold = 180
-
-        def loud(index: int) -> bool:
-            start = index * frame
-            chunk = pcm[start : start + window * frame]
-            if len(chunk) < frame:
-                return False
-            samples = array.array("h")
-            samples.frombytes(chunk[: len(chunk) - len(chunk) % 2])
-            if not samples:
-                return False
-            mean = sum(s * s for s in samples) / len(samples)
-            return mean ** 0.5 > threshold
-
-        head = 0
-        while head + window < n and not loud(head):
-            head += window
-        tail = n
-        while tail - window > head and not loud(tail - window):
-            tail -= window
-        return pcm[head * frame : tail * frame]
-
-    def _crossfade(self, pcm: bytes) -> tuple[bytes, int]:
-        frame = self.FRAME
-        n = len(pcm) // frame
-        fade = int(self.RATE * self.FADE_MS / 1000)
-        if fade < 64 or n <= fade * 2:
-            return pcm, 0
-        samples = array.array("h")
-        samples.frombytes(pcm)
-        fade_n = fade * self.CHANNELS
-        for i in range(fade_n):
-            t = i / fade_n
-            mixed = int(samples[-fade_n + i] * (1.0 - t) + samples[i] * t)
-            if mixed > 32767:
-                mixed = 32767
-            elif mixed < -32768:
-                mixed = -32768
-            samples[-fade_n + i] = mixed
-        return samples.tobytes(), fade * self.FRAME
-
     def _ensure(self) -> bool:
         theme = self.settings.theme if self.settings.theme in MUSIC_THEMES else "piano"
         if theme == self.loaded and self.pcm:
@@ -661,12 +612,10 @@ class Music:
             self.pcm = b""
             self.loaded = ""
             return False
-        looped, wrap_to = self._crossfade(self._trim(raw))
         with self.lock:
-            self.pcm = looped
+            self.pcm = raw
             self.loaded = theme
             self.cursor = 0
-            self.wrap_to = wrap_to
         return True
 
     def _spawn(self) -> None:
@@ -719,7 +668,6 @@ class Music:
         with self.lock:
             pcm = self.pcm
             cursor = self.cursor
-            wrap_to = self.wrap_to
         if not pcm:
             return b"\x00" * size
         out = bytearray()
@@ -728,7 +676,7 @@ class Music:
             out.extend(pcm[cursor : cursor + take])
             cursor += take
             if cursor >= len(pcm):
-                cursor = min(wrap_to, max(0, len(pcm) - self.FRAME))
+                cursor = 0
         with self.lock:
             if self.pcm is pcm:
                 self.cursor = cursor

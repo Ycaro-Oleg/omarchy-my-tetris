@@ -18,5 +18,5 @@ You may share and adapt the recordings for non-commercial use if you keep this c
 and the license link. You may not use them in a paid product or other commercial work
 without a [commercial license](https://www.classicals.de/) from the author.
 
-This plugin uses a short loop taken from each recording, encoded as Opus, then
-trims silence and crossfades the join so playback can repeat without a gap.
+This plugin uses one 8-bar phrase from each recording (12.8s at 150 BPM),
+encoded as Opus, with a 45ms equal-power splice at the join.

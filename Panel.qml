@@ -145,6 +145,13 @@ Panel {
           meta: "Classic · Sprint · Ultra"
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
+          iconComponent: Component {
+            TetrisMark {
+              implicitWidth: Style.font.display
+              implicitHeight: Style.font.display
+              foreground: root.contentForeground
+            }
+          }
         }
 
         Button {
