@@ -202,6 +202,10 @@ class Theme:
         return mix(self.rgb("lighter_background"), self.rgb("dark_background"), 0.22)
 
     @property
+    def grout(self) -> tuple[int, int, int]:
+        return mix((0, 0, 0), self.well, 0.55)
+
+    @property
     def fg(self) -> tuple[int, int, int]:
         return self.rgb("foreground")
 
@@ -1556,15 +1560,15 @@ class App:
                 put(x, y, " ", theme.fg, color)
                 put(x + 1, y, " ", theme.fg, color)
                 return
+            seam = theme.grout
             if ghost:
-                body = mix(color, theme.well, 0.32)
-                put(x, y, " ", theme.fg, mix((255, 255, 255), body, 0.14))
-                put(x + 1, y, " ", theme.fg, mix((0, 0, 0), body, 0.12))
+                dust = mix(color, theme.well, 0.28)
+                put(x, y, "▒", dust, theme.well)
+                put(x + 1, y, "▒", dust, theme.well)
                 return
-            shine = mix((255, 255, 255), color, 0.34)
-            shade = mix((0, 0, 0), color, 0.26)
-            put(x, y, "▀", shine, color)
-            put(x + 1, y, "▄", shade, color)
+            face = mix((255, 255, 255), color, 0.16)
+            put(x, y, "█", face, seam)
+            put(x + 1, y, "▌", color, seam)
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)
