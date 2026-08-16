@@ -263,7 +263,7 @@ def paint_mino(
             dust = mix(color, theme.well, 0.28)
             if seam_bottom:
                 put(x, y, "▁", theme.grout, dust)
-                put(x + 1, y, "▁", theme.grout, dust)
+                put(x + 1, y, "▌", dust, theme.well)
             else:
                 put(x, y, "▒", dust, theme.well)
                 put(x + 1, y, "▒", dust, theme.well)
@@ -272,7 +272,7 @@ def paint_mino(
         if seam_bottom:
             line = mix((0, 0, 0), theme.grout, 0.8)
             put(x, y, "▁", line, face)
-            put(x + 1, y, "▁", line, color)
+            put(x + 1, y, "▌", color, theme.grout)
         else:
             put(x, y, "█", face, theme.grout)
             put(x + 1, y, "▌", color, theme.grout)
