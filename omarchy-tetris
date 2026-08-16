@@ -1,0 +1,1144 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import random
+import re
+import select
+import signal
+import sys
+import termios
+import time
+import tty
+from pathlib import Path
+from typing import Optional
+
+
+COLS = 10
+ROWS = 20
+CELL = 2
+TICK = 1.0 / 30.0
+LOCK_MS = 500
+MAX_LOCK_RESETS = 15
+FLASH_MS = 140
+THEME_PATH = Path.home() / ".local/state/omarchy/current/theme/colors.toml"
+THEME_NAME_PATH = Path.home() / ".local/state/omarchy/current/theme.name"
+SCORE_PATH = Path.home() / ".local/share/omarchy-tetris/scores.json"
+
+FALLBACK = {
+    "mode": "dark",
+    "accent": "#7daea3",
+    "selection": "#504945",
+    "muted": "#665c54",
+    "background": "#282828",
+    "dark_background": "#1e1e1e",
+    "darker_background": "#161616",
+    "lighter_background": "#3c3836",
+    "foreground": "#d4be98",
+    "dark_foreground": "#7c6f64",
+    "light_foreground": "#bdae93",
+    "bright_foreground": "#d4be98",
+    "red": "#ea6962",
+    "yellow": "#d8a657",
+    "orange": "#e1875c",
+    "green": "#a9b665",
+    "cyan": "#89b482",
+    "blue": "#7daea3",
+    "magenta": "#d3869b",
+}
+
+SHAPES = {
+    "I": [
+        [(0, 1), (1, 1), (2, 1), (3, 1)],
+        [(2, 0), (2, 1), (2, 2), (2, 3)],
+        [(0, 2), (1, 2), (2, 2), (3, 2)],
+        [(1, 0), (1, 1), (1, 2), (1, 3)],
+    ],
+    "O": [
+        [(1, 0), (2, 0), (1, 1), (2, 1)],
+        [(1, 0), (2, 0), (1, 1), (2, 1)],
+        [(1, 0), (2, 0), (1, 1), (2, 1)],
+        [(1, 0), (2, 0), (1, 1), (2, 1)],
+    ],
+    "T": [
+        [(1, 0), (0, 1), (1, 1), (2, 1)],
+        [(1, 0), (1, 1), (2, 1), (1, 2)],
+        [(0, 1), (1, 1), (2, 1), (1, 2)],
+        [(1, 0), (0, 1), (1, 1), (1, 2)],
+    ],
+    "S": [
+        [(1, 0), (2, 0), (0, 1), (1, 1)],
+        [(1, 0), (1, 1), (2, 1), (2, 2)],
+        [(1, 1), (2, 1), (0, 2), (1, 2)],
+        [(0, 0), (0, 1), (1, 1), (1, 2)],
+    ],
+    "Z": [
+        [(0, 0), (1, 0), (1, 1), (2, 1)],
+        [(2, 0), (1, 1), (2, 1), (1, 2)],
+        [(0, 1), (1, 1), (1, 2), (2, 2)],
+        [(1, 0), (0, 1), (1, 1), (0, 2)],
+    ],
+    "J": [
+        [(0, 0), (0, 1), (1, 1), (2, 1)],
+        [(1, 0), (2, 0), (1, 1), (1, 2)],
+        [(0, 1), (1, 1), (2, 1), (2, 2)],
+        [(1, 0), (1, 1), (0, 2), (1, 2)],
+    ],
+    "L": [
+        [(2, 0), (0, 1), (1, 1), (2, 1)],
+        [(1, 0), (1, 1), (1, 2), (2, 2)],
+        [(0, 1), (1, 1), (2, 1), (0, 2)],
+        [(0, 0), (1, 0), (1, 1), (1, 2)],
+    ],
+}
+
+KICKS_JLSTZ = {
+    (0, 1): [(0, 0), (-1, 0), (-1, -1), (0, 2), (-1, 2)],
+    (1, 0): [(0, 0), (1, 0), (1, 1), (0, -2), (1, -2)],
+    (1, 2): [(0, 0), (1, 0), (1, 1), (0, -2), (1, -2)],
+    (2, 1): [(0, 0), (-1, 0), (-1, -1), (0, 2), (-1, 2)],
+    (2, 3): [(0, 0), (1, 0), (1, -1), (0, 2), (1, 2)],
+    (3, 2): [(0, 0), (-1, 0), (-1, 1), (0, -2), (-1, -2)],
+    (3, 0): [(0, 0), (-1, 0), (-1, 1), (0, -2), (-1, -2)],
+    (0, 3): [(0, 0), (1, 0), (1, -1), (0, 2), (1, 2)],
+}
+
+KICKS_I = {
+    (0, 1): [(0, 0), (-2, 0), (1, 0), (-2, 1), (1, -2)],
+    (1, 0): [(0, 0), (2, 0), (-1, 0), (2, -1), (-1, 2)],
+    (1, 2): [(0, 0), (-1, 0), (2, 0), (-1, -2), (2, 1)],
+    (2, 1): [(0, 0), (1, 0), (-2, 0), (1, 2), (-2, -1)],
+    (2, 3): [(0, 0), (2, 0), (-1, 0), (2, -1), (-1, 2)],
+    (3, 2): [(0, 0), (-2, 0), (1, 0), (-2, 1), (1, -2)],
+    (3, 0): [(0, 0), (1, 0), (-2, 0), (1, 2), (-2, -1)],
+    (0, 3): [(0, 0), (-1, 0), (2, 0), (-1, -2), (2, 1)],
+}
+
+MODES = ("classic", "sprint", "ultra")
+MODE_LABEL = {"classic": "Classic", "sprint": "Sprint", "ultra": "Ultra"}
+MODE_BLURB = {
+    "classic": "Play until the stack reaches the top.",
+    "sprint": "Clear 40 lines. Fastest time wins.",
+    "ultra": "Two minutes. Highest score wins.",
+}
+LINE_POINTS = {1: 100, 2: 300, 3: 500, 4: 800}
+TSPIN_POINTS = {0: 400, 1: 800, 2: 1200, 3: 1600}
+SPRINT_LINES = 40
+ULTRA_MS = 120_000
+
+
+def hex_rgb(value: str) -> tuple[int, int, int]:
+    text = value.strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(ch * 2 for ch in text)
+    if len(text) != 6:
+        return (128, 128, 128)
+    return (int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16))
+
+
+def mix(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    return (
+        int(a[0] * t + b[0] * (1.0 - t)),
+        int(a[1] * t + b[1] * (1.0 - t)),
+        int(a[2] * t + b[2] * (1.0 - t)),
+    )
+
+
+def parse_toml_colors(path: Path) -> dict[str, str]:
+    data = dict(FALLBACK)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return data
+    for match in re.finditer(r'^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"', text, re.M):
+        data[match.group(1)] = match.group(2)
+    return data
+
+
+class Theme:
+    def __init__(self) -> None:
+        self.name = "default"
+        self.mtime = -1.0
+        self.mode = "dark"
+        self.colors: dict[str, tuple[int, int, int]] = {}
+        self.reload(force=True)
+
+    def rgb(self, key: str) -> tuple[int, int, int]:
+        return self.colors.get(key, hex_rgb(FALLBACK.get(key, "#888888")))
+
+    def reload(self, force: bool = False) -> bool:
+        try:
+            mtime = THEME_PATH.stat().st_mtime if THEME_PATH.is_file() else -1.0
+        except OSError:
+            mtime = -1.0
+        if not force and mtime == self.mtime:
+            return False
+        raw = parse_toml_colors(THEME_PATH) if THEME_PATH.is_file() else dict(FALLBACK)
+        self.mtime = mtime
+        self.mode = raw.get("mode", "dark")
+        self.colors = {key: hex_rgb(value) for key, value in raw.items() if key != "mode"}
+        try:
+            self.name = THEME_NAME_PATH.read_text(encoding="utf-8").strip() or "theme"
+        except OSError:
+            self.name = THEME_PATH.parent.name if THEME_PATH.exists() else "theme"
+        return True
+
+    @property
+    def bg(self) -> tuple[int, int, int]:
+        return self.rgb("background")
+
+    @property
+    def well(self) -> tuple[int, int, int]:
+        return self.rgb("dark_background")
+
+    @property
+    def well_alt(self) -> tuple[int, int, int]:
+        return mix(self.rgb("lighter_background"), self.rgb("dark_background"), 0.22)
+
+    @property
+    def fg(self) -> tuple[int, int, int]:
+        return self.rgb("foreground")
+
+    @property
+    def muted(self) -> tuple[int, int, int]:
+        return self.rgb("muted")
+
+    @property
+    def accent(self) -> tuple[int, int, int]:
+        return self.rgb("accent")
+
+    @property
+    def selection(self) -> tuple[int, int, int]:
+        return self.rgb("selection")
+
+    def piece(self, name: str) -> tuple[int, int, int]:
+        mapping = {
+            "I": "cyan",
+            "O": "yellow",
+            "T": "magenta",
+            "S": "green",
+            "Z": "red",
+            "J": "blue",
+            "L": "orange",
+        }
+        return self.rgb(mapping.get(name, "accent"))
+
+
+def gravity_ms(level: int) -> int:
+    n = max(1, level)
+    seconds = (0.8 - (n - 1) * 0.007) ** (n - 1)
+    return max(16, int(seconds * 1000))
+
+
+def cells(kind: str, rot: int, x: int, y: int) -> list[tuple[int, int]]:
+    return [(x + cx, y + cy) for cx, cy in SHAPES[kind][rot % 4]]
+
+
+class Bag:
+    def __init__(self) -> None:
+        self.pool: list[str] = []
+
+    def take(self) -> str:
+        if not self.pool:
+            self.pool = list("IOTSZJL")
+            random.shuffle(self.pool)
+        return self.pool.pop()
+
+
+class Piece:
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+        self.rot = 0
+        self.x = 3
+        self.y = -1
+
+    def copy(self) -> Piece:
+        piece = Piece(self.kind)
+        piece.rot = self.rot
+        piece.x = self.x
+        piece.y = self.y
+        return piece
+
+    def blocks(self) -> list[tuple[int, int]]:
+        return cells(self.kind, self.rot, self.x, self.y)
+
+
+class Board:
+    def __init__(self) -> None:
+        self.grid: list[list[Optional[str]]] = [[None] * COLS for _ in range(ROWS)]
+
+    def inside(self, x: int, y: int) -> bool:
+        return 0 <= x < COLS and y < ROWS
+
+    def free(self, x: int, y: int) -> bool:
+        if y < 0:
+            return 0 <= x < COLS
+        return self.inside(x, y) and self.grid[y][x] is None
+
+    def fits(self, piece: Piece) -> bool:
+        return all(self.free(x, y) for x, y in piece.blocks())
+
+    def lock(self, piece: Piece) -> None:
+        for x, y in piece.blocks():
+            if 0 <= y < ROWS and 0 <= x < COLS:
+                self.grid[y][x] = piece.kind
+
+    def full_rows(self) -> list[int]:
+        return [y for y in range(ROWS) if all(self.grid[y][x] is not None for x in range(COLS))]
+
+    def clear_rows(self, rows: list[int]) -> None:
+        keep = [self.grid[y] for y in range(ROWS) if y not in set(rows)]
+        pad = [[None] * COLS for _ in range(len(rows))]
+        self.grid = pad + keep
+
+    def occupied_corners(self, piece: Piece) -> int:
+        cx, cy = piece.x + 1, piece.y + 1
+        count = 0
+        for x, y in ((cx - 1, cy - 1), (cx + 1, cy - 1), (cx - 1, cy + 1), (cx + 1, cy + 1)):
+            if y < 0:
+                continue
+            if not self.inside(x, y) or self.grid[y][x] is not None:
+                count += 1
+        return count
+
+
+class Scores:
+    def __init__(self) -> None:
+        self.data = {mode: [] for mode in MODES}
+        self.load()
+
+    def load(self) -> None:
+        try:
+            raw = json.loads(SCORE_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(raw, dict):
+            return
+        for mode in MODES:
+            rows = raw.get(mode, [])
+            if isinstance(rows, list):
+                self.data[mode] = [row for row in rows if isinstance(row, dict)][:8]
+
+    def save(self) -> None:
+        SCORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SCORE_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(self.data, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(SCORE_PATH)
+
+    def add(self, mode: str, row: dict) -> None:
+        bucket = list(self.data.get(mode, []))
+        bucket.append(row)
+        if mode == "sprint":
+            bucket.sort(key=lambda item: (0 if item.get("finished") else 1, item.get("time_ms", 1_000_000_000)))
+        else:
+            bucket.sort(key=lambda item: -int(item.get("score", 0)))
+        self.data[mode] = bucket[:8]
+        self.save()
+
+    def best(self, mode: str) -> Optional[dict]:
+        rows = self.data.get(mode) or []
+        return rows[0] if rows else None
+
+
+class Game:
+    def __init__(self, mode: str) -> None:
+        self.mode = mode
+        self.board = Board()
+        self.bag = Bag()
+        self.next = [self.bag.take() for _ in range(3)]
+        self.hold: Optional[str] = None
+        self.hold_used = False
+        self.score = 0
+        self.lines = 0
+        self.level = 1
+        self.combo = -1
+        self.b2b = False
+        self.alive = True
+        self.won = False
+        self.saved = False
+        self.paused = False
+        self.last_rotate = False
+        self.lock_resets = 0
+        self.lock_until = 0.0
+        self.clearing: list[int] = []
+        self.clear_until = 0.0
+        self.banner = ""
+        self.banner_until = 0.0
+        self.started = time.monotonic()
+        self.elapsed_ms = 0
+        self.ended_at: Optional[float] = None
+        self.piece = self.spawn()
+
+    def spawn_piece(self, kind: str) -> Optional[Piece]:
+        piece = Piece(kind)
+        if self.board.fits(piece):
+            return piece
+        piece.y -= 1
+        if self.board.fits(piece):
+            return piece
+        return None
+
+    def spawn(self) -> Optional[Piece]:
+        kind = self.next.pop(0)
+        self.next.append(self.bag.take())
+        piece = self.spawn_piece(kind)
+        self.hold_used = False
+        self.last_rotate = False
+        self.lock_resets = 0
+        self.lock_until = 0.0
+        self.gravity_at = time.monotonic() + gravity_ms(self.level) / 1000.0
+        if piece is None:
+            self.finish(False)
+        return piece
+
+    def finish(self, won: bool) -> None:
+        if not self.alive:
+            return
+        self.alive = False
+        self.won = won
+        self.ended_at = time.monotonic()
+        self.elapsed_ms = int((self.ended_at - self.started) * 1000)
+
+    def remaining_ms(self) -> int:
+        if self.mode != "ultra":
+            return 0
+        used = self.clock_ms()
+        return max(0, ULTRA_MS - used)
+
+    def clock_ms(self) -> int:
+        if self.ended_at is not None:
+            return int((self.ended_at - self.started) * 1000)
+        if self.paused:
+            return self.elapsed_ms
+        return int((time.monotonic() - self.started) * 1000)
+
+    def ghost(self) -> Optional[Piece]:
+        if self.piece is None:
+            return None
+        ghost = self.piece.copy()
+        while True:
+            ghost.y += 1
+            if not self.board.fits(ghost):
+                ghost.y -= 1
+                return ghost
+
+    def try_move(self, dx: int, dy: int) -> bool:
+        if self.piece is None or not self.alive or self.paused or self.clearing:
+            return False
+        nxt = self.piece.copy()
+        nxt.x += dx
+        nxt.y += dy
+        if not self.board.fits(nxt):
+            return False
+        self.piece = nxt
+        self.last_rotate = False
+        self.touch_lock(moved=True)
+        return True
+
+    def try_rotate(self, delta: int) -> bool:
+        if self.piece is None or not self.alive or self.paused or self.clearing:
+            return False
+        start = self.piece.rot
+        dest = (start + delta) % 4
+        kicks = [(0, 0)]
+        if self.piece.kind == "I":
+            kicks = KICKS_I.get((start, dest), kicks)
+        elif self.piece.kind != "O":
+            kicks = KICKS_JLSTZ.get((start, dest), kicks)
+        for kx, ky in kicks:
+            nxt = self.piece.copy()
+            nxt.rot = dest
+            nxt.x += kx
+            nxt.y += ky
+            if self.board.fits(nxt):
+                self.piece = nxt
+                self.last_rotate = True
+                self.touch_lock(moved=True)
+                return True
+        return False
+
+    def hard_drop(self) -> None:
+        if self.piece is None or not self.alive or self.paused or self.clearing:
+            return
+        dist = 0
+        while self.try_move(0, 1):
+            dist += 1
+        self.score += dist * 2
+        self.lock_piece()
+
+    def soft_drop(self) -> None:
+        if self.try_move(0, 1):
+            self.score += 1
+
+    def swap_hold(self) -> None:
+        if self.piece is None or self.hold_used or not self.alive or self.paused or self.clearing:
+            return
+        current = self.piece.kind
+        if self.hold is None:
+            self.hold = current
+            self.piece = self.spawn()
+        else:
+            held = self.hold
+            self.hold = current
+            self.piece = self.spawn_piece(held)
+            if self.piece is None:
+                self.finish(False)
+                return
+            self.last_rotate = False
+            self.lock_resets = 0
+            self.lock_until = 0.0
+            self.gravity_at = time.monotonic() + gravity_ms(self.level) / 1000.0
+        self.hold_used = True
+
+    def grounded(self) -> bool:
+        if self.piece is None:
+            return False
+        test = self.piece.copy()
+        test.y += 1
+        return not self.board.fits(test)
+
+    def touch_lock(self, moved: bool) -> None:
+        if not self.grounded():
+            self.lock_until = 0.0
+            return
+        if moved and self.lock_resets < MAX_LOCK_RESETS:
+            self.lock_resets += 1
+            self.lock_until = time.monotonic() + LOCK_MS / 1000.0
+        elif self.lock_until == 0.0:
+            self.lock_until = time.monotonic() + LOCK_MS / 1000.0
+
+    def lock_piece(self) -> None:
+        if self.piece is None:
+            return
+        tspin = self.piece.kind == "T" and self.last_rotate and self.board.occupied_corners(self.piece) >= 3
+        self.board.lock(self.piece)
+        rows = self.board.full_rows()
+        if rows:
+            self.clearing = rows
+            self.clear_until = time.monotonic() + FLASH_MS / 1000.0
+            self.pending_tspin = tspin
+            self.piece = None
+            return
+        self.apply_clear(0, tspin)
+        self.piece = self.spawn()
+
+    def apply_clear(self, count: int, tspin: bool) -> None:
+        difficult = count == 4 or (tspin and count > 0)
+        awarded = 0
+        label = ""
+        if tspin:
+            awarded = TSPIN_POINTS.get(count, 400) * self.level
+            label = {0: "T-SPIN", 1: "T-SPIN SINGLE", 2: "T-SPIN DOUBLE", 3: "T-SPIN TRIPLE"}.get(count, "T-SPIN")
+        elif count:
+            awarded = LINE_POINTS[count] * self.level
+            label = {1: "SINGLE", 2: "DOUBLE", 3: "TRIPLE", 4: "TETRIS"}[count]
+        if count:
+            if self.combo >= 0:
+                awarded += 50 * self.combo * self.level
+            self.combo += 1
+            if self.combo >= 1:
+                label = f"{label}  x{self.combo + 1}" if label else f"COMBO x{self.combo + 1}"
+        else:
+            self.combo = -1
+        if difficult and self.b2b and awarded:
+            awarded = int(awarded * 1.5)
+            label = f"B2B {label}" if label else label
+        if count:
+            self.b2b = difficult
+            self.lines += count
+            self.level = 1 + self.lines // 10
+        if awarded:
+            self.score += awarded
+        if label:
+            self.banner = label
+            self.banner_until = time.monotonic() + 1.1
+        if self.mode == "sprint" and self.lines >= SPRINT_LINES:
+            self.finish(True)
+        self.pending_tspin = False
+
+    def tick(self, now: float) -> None:
+        if not self.alive or self.paused:
+            return
+        if self.mode == "ultra" and self.remaining_ms() <= 0:
+            self.finish(True)
+            return
+        if self.clearing:
+            if now >= self.clear_until:
+                count = len(self.clearing)
+                self.board.clear_rows(self.clearing)
+                self.clearing = []
+                self.apply_clear(count, getattr(self, "pending_tspin", False))
+                if self.alive:
+                    self.piece = self.spawn()
+            return
+        if self.piece is None:
+            return
+        if self.grounded():
+            if self.lock_until == 0.0:
+                self.touch_lock(moved=False)
+            elif now >= self.lock_until:
+                self.lock_piece()
+            return
+        if now >= self.gravity_at:
+            self.try_move(0, 1)
+            self.gravity_at = now + gravity_ms(self.level) / 1000.0
+
+    def toggle_pause(self) -> None:
+        if not self.alive:
+            return
+        if self.paused:
+            paused_for = time.monotonic() - self.pause_started
+            self.started += paused_for
+            self.gravity_at += paused_for
+            if self.lock_until:
+                self.lock_until += paused_for
+            if self.clear_until:
+                self.clear_until += paused_for
+            self.paused = False
+        else:
+            self.elapsed_ms = self.clock_ms()
+            self.pause_started = time.monotonic()
+            self.paused = True
+
+    pending_tspin = False
+    pause_started = 0.0
+
+
+def ansi_fg(rgb: tuple[int, int, int]) -> str:
+    return f"\x1b[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
+
+
+def ansi_bg(rgb: tuple[int, int, int]) -> str:
+    return f"\x1b[48;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
+
+
+def paint(text: str, fg: tuple[int, int, int], bg: Optional[tuple[int, int, int]] = None) -> str:
+    out = ansi_fg(fg)
+    if bg is not None:
+        out += ansi_bg(bg)
+    return out + text
+
+
+RESET = "\x1b[0m"
+
+
+def fmt_score(n: int) -> str:
+    return f"{n:,}".replace(",", " ")
+
+
+def fmt_time(ms: int) -> str:
+    ms = max(0, ms)
+    minutes, rem = divmod(ms // 1000, 60)
+    seconds = rem
+    hundredths = (ms % 1000) // 10
+    return f"{minutes}:{seconds:02d}.{hundredths:02d}"
+
+
+def term_size() -> tuple[int, int]:
+    try:
+        size = os.get_terminal_size()
+        return size.columns, size.lines
+    except OSError:
+        return 80, 24
+
+
+class Screen:
+    def __init__(self, theme: Theme) -> None:
+        self.theme = theme
+        self.cols, self.rows = term_size()
+
+    def refresh_size(self) -> None:
+        self.cols, self.rows = term_size()
+
+    def cell(self, color: tuple[int, int, int], ghost: bool = False) -> str:
+        if ghost:
+            body = mix(color, self.theme.well, 0.38)
+            return paint("░░", body, self.theme.well)
+        return paint("  ", self.theme.fg, color)
+
+    def blank_well(self, x: int, y: int) -> str:
+        shade = self.theme.well_alt if (x + y) % 2 else self.theme.well
+        return paint("  ", self.theme.fg, shade)
+
+    def fill_line(self, width: int, bg: tuple[int, int, int]) -> str:
+        return paint(" " * width, self.theme.fg, bg) + RESET
+
+
+class App:
+    def __init__(self) -> None:
+        self.theme = Theme()
+        self.screen = Screen(self.theme)
+        self.scores = Scores()
+        self.page = "menu"
+        self.menu_index = 0
+        self.game: Optional[Game] = None
+        self.running = True
+        self.old_term: Optional[list] = None
+        self.buf = bytearray()
+
+    def start_mode(self, mode: str) -> None:
+        self.game = Game(mode)
+        self.page = "play"
+
+    def record_score(self) -> None:
+        game = self.game
+        if game is None:
+            return
+        row = {
+            "score": game.score,
+            "lines": game.lines,
+            "level": game.level,
+            "time_ms": game.clock_ms(),
+            "finished": bool(game.won),
+            "at": time.strftime("%Y-%m-%d %H:%M"),
+        }
+        self.scores.add(game.mode, row)
+
+    def read_keys(self, timeout: float) -> list[str]:
+        keys: list[str] = []
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if ready:
+            try:
+                chunk = os.read(sys.stdin.fileno(), 64)
+            except OSError:
+                chunk = b""
+            self.buf.extend(chunk)
+        data = bytes(self.buf)
+        self.buf.clear()
+        i = 0
+        while i < len(data):
+            b = data[i]
+            if b == 0x1B:
+                if i + 2 < len(data) and data[i + 1] == ord("["):
+                    code = data[i + 2]
+                    mapping = {ord("A"): "up", ord("B"): "down", ord("C"): "right", ord("D"): "left"}
+                    keys.append(mapping.get(code, "esc"))
+                    i += 3
+                    continue
+                if i + 1 == len(data):
+                    keys.append("esc")
+                    i += 1
+                    continue
+                keys.append("esc")
+                i += 1
+                continue
+            if b in (3,):
+                keys.append("quit")
+            elif b in (13, 10):
+                keys.append("enter")
+            elif b == 32:
+                keys.append("space")
+            elif b in (127, 8):
+                keys.append("back")
+            else:
+                ch = chr(b).lower()
+                names = {
+                    "a": "left",
+                    "d": "right",
+                    "s": "down",
+                    "w": "up",
+                    "x": "up",
+                    "z": "ccw",
+                    "c": "hold",
+                    "p": "pause",
+                    "q": "quit",
+                    "r": "retry",
+                    "h": "left",
+                    "l": "right",
+                    "j": "down",
+                    "k": "up",
+                }
+                keys.append(names.get(ch, ch))
+            i += 1
+        return keys
+
+    def handle_menu(self, keys: list[str]) -> None:
+        for key in keys:
+            if key in ("up", "k"):
+                self.menu_index = (self.menu_index - 1) % len(MODES)
+            elif key in ("down", "j"):
+                self.menu_index = (self.menu_index + 1) % len(MODES)
+            elif key in ("enter", "space"):
+                self.start_mode(MODES[self.menu_index])
+            elif key in ("1", "2", "3"):
+                self.menu_index = int(key) - 1
+                self.start_mode(MODES[self.menu_index])
+            elif key in ("quit", "esc", "q"):
+                self.running = False
+
+    def handle_play(self, keys: list[str]) -> None:
+        game = self.game
+        if game is None:
+            return
+        if not game.alive:
+            for key in keys:
+                if key in ("enter", "retry", "r", "space"):
+                    if not game.saved:
+                        self.record_score()
+                        game.saved = True
+                    self.start_mode(game.mode)
+                    return
+                if key in ("quit", "esc", "q"):
+                    if not game.saved:
+                        self.record_score()
+                        game.saved = True
+                    self.page = "menu"
+                    return
+            return
+        for key in keys:
+            if key in ("pause", "p", "esc"):
+                game.toggle_pause()
+                continue
+            if game.paused:
+                if key in ("quit", "q"):
+                    self.record_if_needed()
+                    self.page = "menu"
+                    return
+                if key in ("retry", "r"):
+                    self.record_if_needed()
+                    self.start_mode(game.mode)
+                    return
+                continue
+            if key == "left":
+                game.try_move(-1, 0)
+            elif key == "right":
+                game.try_move(1, 0)
+            elif key == "down":
+                game.soft_drop()
+            elif key == "up":
+                game.try_rotate(1)
+            elif key == "ccw":
+                game.try_rotate(-1)
+            elif key == "space":
+                game.hard_drop()
+            elif key == "hold":
+                game.swap_hold()
+            elif key in ("retry", "r"):
+                self.record_if_needed()
+                self.start_mode(game.mode)
+                return
+            elif key == "quit":
+                self.record_if_needed()
+                self.page = "menu"
+                return
+
+    def record_if_needed(self) -> None:
+        game = self.game
+        if game is None or game.saved:
+            return
+        if game.score > 0 or game.lines > 0:
+            if game.alive and game.clock_ms() > 1500:
+                game.finish(False)
+            if not game.alive:
+                self.record_score()
+                game.saved = True
+
+    def min_size(self) -> tuple[int, int]:
+        return 56, 24
+
+    def draw(self) -> None:
+        self.screen.refresh_size()
+        cols, rows = self.screen.cols, self.screen.rows
+        need_w, need_h = self.min_size()
+        bg = self.theme.bg
+        lines: list[str] = []
+        if cols < need_w or rows < need_h:
+            msg = f"Need at least {need_w}x{need_h}  (now {cols}x{rows})"
+            for y in range(rows):
+                if y == rows // 2:
+                    pad = max(0, (cols - len(msg)) // 2)
+                    text = " " * pad + msg
+                    text = text[:cols].ljust(cols)
+                    lines.append(paint(text, self.theme.fg, bg) + RESET)
+                else:
+                    lines.append(self.screen.fill_line(cols, bg))
+            self.blit(lines)
+            return
+        if self.page == "menu":
+            lines = self.draw_menu(cols, rows, bg)
+        else:
+            lines = self.draw_play(cols, rows, bg)
+        self.blit(lines)
+
+    def blit(self, lines: list[str]) -> None:
+        rows = self.screen.rows
+        cols = self.screen.cols
+        while len(lines) < rows:
+            lines.append(self.screen.fill_line(cols, self.theme.bg))
+        sys.stdout.write("\x1b[H" + "\n".join(lines[:rows]))
+        sys.stdout.flush()
+
+    def draw_menu(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
+        theme = self.theme
+        letters = [
+            ("T", theme.piece("T")),
+            ("E", theme.piece("I")),
+            ("T", theme.piece("O")),
+            ("R", theme.piece("Z")),
+            ("I", theme.piece("J")),
+            ("S", theme.piece("S")),
+        ]
+        title = "  ".join(paint(ch, color, bg) for ch, color in letters)
+        title_plain = "  ".join(ch for ch, _ in letters)
+        subtitle = "theme  " + theme.name
+        hint = "enter play   ↑↓ select   q quit"
+        body: list[tuple[str, tuple[int, int, int]]] = []
+        body.append(("", theme.fg))
+        body.append((title_plain, theme.fg))
+        body.append((subtitle, theme.muted))
+        body.append(("", theme.fg))
+        for i, mode in enumerate(MODES):
+            selected = i == self.menu_index
+            mark = "▸ " if selected else "  "
+            best = self.scores.best(mode)
+            if mode == "sprint":
+                best_txt = fmt_time(int(best["time_ms"])) if best and best.get("finished") else "—"
+            else:
+                best_txt = fmt_score(int(best["score"])) if best else "—"
+            line1 = f"{mark}{MODE_LABEL[mode]}"
+            line2 = f"    {MODE_BLURB[mode]}"
+            line3 = f"    best  {best_txt}"
+            color = theme.accent if selected else theme.fg
+            muted = theme.accent if selected else theme.muted
+            body.append((line1, color))
+            body.append((line2, muted))
+            body.append((line3, muted))
+            body.append(("", theme.fg))
+        body.append((hint, theme.muted))
+        top = max(1, (rows - len(body)) // 2)
+        lines: list[str] = []
+        for y in range(rows):
+            idx = y - top
+            if 0 <= idx < len(body):
+                text, color = body[idx]
+                if idx == 1:
+                    pad = max(0, (cols - len(title_plain)) // 2)
+                    row = paint(" " * pad, theme.fg, bg) + title + paint(" " * max(0, cols - pad - len(title_plain)), theme.fg, bg) + RESET
+                    lines.append(row)
+                    continue
+                pad = max(0, (cols - len(text)) // 2)
+                filled = (" " * pad + text)[:cols].ljust(cols)
+                if 0 <= idx < len(body) and body[idx][0].startswith("▸"):
+                    lines.append(paint(filled, color, mix(theme.selection, bg, 0.55)) + RESET)
+                else:
+                    lines.append(paint(filled, color, bg) + RESET)
+            else:
+                lines.append(self.screen.fill_line(cols, bg))
+        return lines
+
+    def draw_play(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
+        game = self.game
+        assert game is not None
+        theme = self.theme
+        well_w = COLS * CELL + 2
+        side = 14
+        gap = 2
+        total_w = side + gap + well_w + gap + side
+        left0 = max(1, (cols - total_w) // 2)
+        well0 = left0 + side + gap
+        right0 = well0 + well_w + gap
+        header_y = max(0, (rows - (ROWS + 3)) // 2)
+        well_y = header_y + 2
+        canvas = [[(" ", theme.fg, bg) for _ in range(cols)] for _ in range(rows)]
+
+        def put(x: int, y: int, ch: str, fg: tuple[int, int, int], bgc: tuple[int, int, int]) -> None:
+            if 0 <= y < rows and 0 <= x < cols:
+                canvas[y][x] = (ch[:1], fg, bgc)
+
+        def put_str(x: int, y: int, text: str, fg: tuple[int, int, int], bgc: tuple[int, int, int]) -> None:
+            for i, ch in enumerate(text):
+                put(x + i, y, ch, fg, bgc)
+
+        def put_cell(x: int, y: int, color: tuple[int, int, int], ghost: bool = False) -> None:
+            if ghost:
+                ink = mix(color, theme.well, 0.42)
+                put(x, y, "░", ink, theme.well)
+                put(x + 1, y, "░", ink, theme.well)
+            else:
+                put(x, y, " ", theme.fg, color)
+                put(x + 1, y, " ", theme.fg, color)
+
+        title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
+        put_str(well0, header_y, title, theme.accent, bg)
+        name = theme.name
+        put_str(max(well0, cols - len(name) - 2), header_y, name, theme.muted, bg)
+
+        for y in range(ROWS):
+            put(well0, well_y + y, "│", theme.muted, theme.well)
+            put(well0 + well_w - 1, well_y + y, "│", theme.muted, theme.well)
+            for x in range(COLS):
+                shade = theme.well_alt if (x + y) % 2 else theme.well
+                put_cell(well0 + 1 + x * CELL, well_y + y, shade)
+        put_str(well0, well_y - 1, "╭" + "─" * (well_w - 2) + "╮", theme.muted, theme.well)
+        put_str(well0, well_y + ROWS, "╰" + "─" * (well_w - 2) + "╯", theme.muted, theme.well)
+
+        for y in range(ROWS):
+            for x in range(COLS):
+                kind = game.board.grid[y][x]
+                if kind:
+                    color = theme.piece(kind)
+                    if y in game.clearing:
+                        color = mix(theme.rgb("bright_foreground"), color, 0.75)
+                    put_cell(well0 + 1 + x * CELL, well_y + y, color)
+
+        if game.piece and game.alive and not game.paused:
+            ghost = game.ghost()
+            if ghost:
+                for x, y in ghost.blocks():
+                    if 0 <= y < ROWS:
+                        put_cell(well0 + 1 + x * CELL, well_y + y, theme.piece(game.piece.kind), ghost=True)
+            for x, y in game.piece.blocks():
+                if 0 <= y < ROWS:
+                    put_cell(well0 + 1 + x * CELL, well_y + y, theme.piece(game.piece.kind))
+
+        def mini(kind: Optional[str], ox: int, oy: int) -> None:
+            box_w = 12
+            put_str(ox, oy, "╭" + "─" * (box_w - 2) + "╮", theme.muted, bg)
+            for row in range(2):
+                put(ox, oy + 1 + row, "│", theme.muted, bg)
+                put_str(ox + 1, oy + 1 + row, " " * (box_w - 2), theme.fg, theme.well)
+                put(ox + box_w - 1, oy + 1 + row, "│", theme.muted, bg)
+            put_str(ox, oy + 3, "╰" + "─" * (box_w - 2) + "╯", theme.muted, bg)
+            if not kind:
+                return
+            blocks = SHAPES[kind][0]
+            minx = min(b[0] for b in blocks)
+            miny = min(b[1] for b in blocks)
+            maxx = max(b[0] for b in blocks)
+            maxy = max(b[1] for b in blocks)
+            pw = (maxx - minx + 1) * CELL
+            ph = maxy - miny + 1
+            sx = ox + 1 + max(0, (box_w - 2 - pw) // 2)
+            sy = oy + 1 + max(0, (2 - ph) // 2)
+            for cx, cy in blocks:
+                put_cell(sx + (cx - minx) * CELL, sy + (cy - miny), theme.piece(kind))
+
+        put_str(left0, well_y - 1, "HOLD", theme.muted, bg)
+        mini(game.hold, left0, well_y)
+        put_str(left0, well_y + 5, "SCORE", theme.muted, bg)
+        put_str(left0, well_y + 6, fmt_score(game.score), theme.fg, bg)
+        put_str(left0, well_y + 8, "LEVEL", theme.muted, bg)
+        put_str(left0, well_y + 9, str(game.level), theme.fg, bg)
+        put_str(left0, well_y + 11, "LINES", theme.muted, bg)
+        if game.mode == "sprint":
+            put_str(left0, well_y + 12, f"{min(game.lines, SPRINT_LINES)} / {SPRINT_LINES}", theme.fg, bg)
+        else:
+            put_str(left0, well_y + 12, str(game.lines), theme.fg, bg)
+        if game.mode == "ultra":
+            put_str(left0, well_y + 14, "TIME", theme.muted, bg)
+            put_str(left0, well_y + 15, fmt_time(game.remaining_ms()), theme.accent, bg)
+        elif game.mode == "sprint":
+            put_str(left0, well_y + 14, "TIME", theme.muted, bg)
+            put_str(left0, well_y + 15, fmt_time(game.clock_ms()), theme.accent, bg)
+        if game.banner and time.monotonic() < game.banner_until:
+            put_str(left0, well_y + 17, game.banner, theme.accent, bg)
+
+        put_str(right0, well_y - 1, "NEXT", theme.muted, bg)
+        for i, kind in enumerate(game.next):
+            mini(kind, right0, well_y + i * 4)
+
+        help_y = min(rows - 1, well_y + ROWS + 1)
+        help_txt = "←→ move   ↑ rotate   z ccw   space drop   c hold   p pause   q menu"
+        put_str(max(0, (cols - len(help_txt)) // 2), help_y, help_txt, theme.muted, bg)
+
+        overlay = ""
+        if game.paused:
+            overlay = "PAUSED"
+            sub = "p resume   r retry   q menu"
+        elif not game.alive:
+            if game.mode == "sprint" and game.won:
+                overlay = "CLEARED"
+                sub = f"{fmt_time(game.clock_ms())}    enter retry   q menu"
+            elif game.mode == "ultra":
+                overlay = "TIME UP" if game.won else "TOP OUT"
+                sub = f"{fmt_score(game.score)}    enter retry   q menu"
+            else:
+                overlay = "GAME OVER"
+                sub = f"{fmt_score(game.score)}    enter retry   q menu"
+        if overlay:
+            box_w = max(len(overlay), len(sub)) + 6
+            box_h = 5
+            ox = well0 + (well_w - box_w) // 2
+            oy = well_y + (ROWS - box_h) // 2
+            panel = mix(theme.rgb("darker_background"), theme.selection, 0.55)
+            for yy in range(box_h):
+                for xx in range(box_w):
+                    put(ox + xx, oy + yy, " ", theme.fg, panel)
+            put_str(ox + (box_w - len(overlay)) // 2, oy + 1, overlay, theme.accent, panel)
+            put_str(ox + (box_w - len(sub)) // 2, oy + 3, sub, theme.fg, panel)
+
+        lines: list[str] = []
+        for y in range(rows):
+            parts: list[str] = []
+            last_fg = None
+            last_bg = None
+            run = []
+            def flush() -> None:
+                if not run:
+                    return
+                parts.append(paint("".join(run), last_fg, last_bg))
+                run.clear()
+            for ch, fg, bgc in canvas[y]:
+                if fg != last_fg or bgc != last_bg:
+                    flush()
+                    last_fg, last_bg = fg, bgc
+                run.append(ch)
+            flush()
+            parts.append(RESET)
+            lines.append("".join(parts))
+        return lines
+
+    def setup_term(self) -> None:
+        self.old_term = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin.fileno())
+        sys.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?7l\x1b]0;Tetris\x07")
+        sys.stdout.flush()
+
+    def restore_term(self) -> None:
+        sys.stdout.write("\x1b[?7h\x1b[?25h\x1b[?1049l")
+        sys.stdout.flush()
+        if self.old_term is not None:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_term)
+
+    def run(self) -> int:
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            sys.stderr.write("omarchy-tetris needs an interactive terminal\n")
+            return 1
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+        self.setup_term()
+
+        def handle_int(_sig, _frame) -> None:
+            self.running = False
+
+        signal.signal(signal.SIGINT, handle_int)
+        signal.signal(signal.SIGTERM, handle_int)
+        try:
+            while self.running:
+                self.theme.reload()
+                now = time.monotonic()
+                if self.page == "play" and self.game is not None:
+                    self.game.tick(now)
+                    if not self.game.alive and not self.game.saved:
+                        self.record_score()
+                        self.game.saved = True
+                self.draw()
+                keys = self.read_keys(TICK)
+                if self.page == "menu":
+                    self.handle_menu(keys)
+                else:
+                    self.handle_play(keys)
+        finally:
+            self.restore_term()
+        return 0
+
+
+def main() -> int:
+    return App().run()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

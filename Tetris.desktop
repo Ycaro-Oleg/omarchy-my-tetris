@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Tetris
+Comment=Theme-aware terminal Tetris
+Exec=sh -c 'xdg-terminal-exec --app-id=org.omarchy.tetris -e "$HOME/.config/omarchy/plugins/ycarooleg.tetris/omarchy-tetris"'
+Icon=applications-games
+Terminal=false
+Categories=Game;BlocksGame;
+StartupNotify=true
