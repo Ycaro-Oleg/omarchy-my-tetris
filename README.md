@@ -4,27 +4,54 @@ A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows t
 
 The game opens as a normal tiled window, so it joins whatever layout you are already using. Move and resize it with your usual keys. Dark themes use `icon-white.svg`; light themes use the original black `icon.svg`.
 
-## Install
+## 1.5.0
 
-```sh
-omarchy plugin add https://github.com/Ycaro-Oleg/omarchy-my-tetris.git --enable
-```
+This release adds a way to start the game from any terminal, a way to take the bar icon off if you do not want it, and a full key list on the menu.
 
-That clones the repo into `~/.config/omarchy/plugins/terminal.tetris/`. Click the bar icon to open the panel, then Play. In a terminal, type `tetris` to play in that same session:
+### Play from a terminal
+
+Type `tetris` in any terminal. The game starts in that same session. You do not need the bar.
 
 ```sh
 tetris
 ```
 
-## Usage
+The command lives at `~/.local/bin/tetris` and runs the plugin in place. `omarchy-tetris` does the same thing.
 
-Left click the bar icon for the panel. Right click starts a game. Escape closes the panel. `omarchy-shell shell summon terminal.tetris` opens it the same way. Super+Space lists the desktop launcher (the tetromino icon). **Remove from bar** is under Play in the panel. On the game menu, `i` takes the icon off the bar and `u` puts it back.
+### Remove the bar icon
 
-| Mode | Goal |
+The bar icon is optional.
+
+- Open the panel from the bar icon. The first section is **Bar**. Click **Remove from bar**.
+- Or, on the game menu, press **`i`**. The icon leaves the bar. Super+Space still launches the game.
+
+Put it back with **`u`** on the menu, or:
+
+```sh
+omarchy bar put terminal.tetris --section center --before omarchy.indicators
+```
+
+That places it in the center, next to dictate, screen recording, and reminders.
+
+### Keybinds
+
+On the **menu**:
+
+| Key | Action |
 |---|---|
-| **Classic** | Play until the stack reaches the top |
-| **Sprint** | Clear 40 lines. Fastest time wins |
-| **Ultra** | Two minutes. Highest score wins |
+| ↑ ↓ | Change mode |
+| enter / space | Start the selected mode |
+| ← → | Cycle look (NES, flat, brick, blocks) |
+| [ ] | Game volume |
+| - = | Music volume |
+| t | Next music theme |
+| n | Next landing sound |
+| m | Mute music only |
+| i | Remove the Tetris icon from the bar |
+| u | Put the Tetris icon on the bar |
+| q | Quit |
+
+In a **game**:
 
 | Key | Action |
 |---|---|
@@ -32,19 +59,43 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | ↑ / x | Rotate |
 | z | Rotate the other way |
 | ↓ | Soft drop |
-| Space | Hard drop |
+| space | Hard drop |
 | c | Hold |
+| b | Cycle look |
 | n | Next landing sound |
 | t | Next music theme |
-| b / ← → | Next mino look (arrows on the menu) |
-| i | Remove the Tetris icon from the bar |
-| u | Put the Tetris icon on the bar |
 | m | Mute music only |
 | [ ] | Game volume |
 | - = | Music volume |
 | p / Esc | Pause |
 | r | Retry |
-| q | Menu, or quit from the menu |
+| q | Back to the menu |
+
+The menu also prints this list under the look picker.
+
+## Install
+
+```sh
+omarchy plugin add https://github.com/Ycaro-Oleg/omarchy-my-tetris.git --enable
+```
+
+That clones the repo into `~/.config/omarchy/plugins/terminal.tetris/`. Click the bar icon to open the panel, then Play. Or type `tetris` in a terminal.
+
+To get the `tetris` command on this machine, put the wrapper on your `PATH`:
+
+```sh
+ln -sf ~/.config/omarchy/plugins/terminal.tetris/omarchy-tetris ~/.local/bin/tetris
+```
+
+## Usage
+
+Left click the bar icon for the panel. Right click starts a game. Escape closes the panel. `omarchy-shell shell summon terminal.tetris` opens it the same way. Super+Space lists the desktop launcher (the tetromino icon).
+
+| Mode | Goal |
+|---|---|
+| **Classic** | Play until the stack reaches the top |
+| **Sprint** | Clear 40 lines. Fastest time wins |
+| **Ultra** | Two minutes. Highest score wins |
 
 Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use a chime that rises with 2–7 lines. Music themes are **piano**, **strings**, and **music box**. Mino looks are **NES**, **flat**, **brick**, and **blocks**. Mute music from the panel or with `m`; landing and score sounds stay on. Game volume and music volume are separate. Settings live in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
 
