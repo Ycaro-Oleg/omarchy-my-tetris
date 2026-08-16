@@ -751,6 +751,7 @@ class Game:
         self.was_grounded = False
         self.just_landed = False
         self.just_scored = 0
+        self.just_failed = False
         self.piece = self.spawn()
 
     def spawn_piece(self, kind: str) -> Optional[Piece]:
@@ -774,13 +775,15 @@ class Game:
             self.finish(False)
         return piece
 
-    def finish(self, won: bool) -> None:
+    def finish(self, won: bool, sound: bool = True) -> None:
         if not self.alive:
             return
         self.alive = False
         self.won = won
         self.ended_at = time.monotonic()
         self.elapsed_ms = int((self.ended_at - self.started) * 1000)
+        if not won and sound:
+            self.just_failed = True
 
     def remaining_ms(self) -> int:
         if self.mode != "ultra":
@@ -899,6 +902,11 @@ class Game:
     def consume_score(self) -> int:
         hit = int(self.just_scored or 0)
         self.just_scored = 0
+        return hit
+
+    def consume_fail(self) -> bool:
+        hit = self.just_failed
+        self.just_failed = False
         return hit
 
     def touch_lock(self, moved: bool) -> None:
@@ -1327,7 +1335,7 @@ class App:
             return
         if game.score > 0 or game.lines > 0:
             if game.alive and game.clock_ms() > 1500:
-                game.finish(False)
+                game.finish(False, sound=False)
             if not game.alive:
                 self.record_score()
                 game.saved = True
@@ -1681,6 +1689,8 @@ class App:
                     cleared = self.game.consume_score()
                     if cleared:
                         self.sound.play(self.sound.clear_voice(cleared))
+                    if self.game.consume_fail():
+                        self.sound.play("fail")
                     if not self.game.alive and not self.game.saved:
                         self.record_score()
                         self.game.saved = True
