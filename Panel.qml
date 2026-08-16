@@ -69,6 +69,13 @@ Panel {
     root.bar.run("omarchy-launch-or-focus-tui --app-id=org.omarchy.tetris " + root.gamePath)
   }
 
+  function removeFromBar() {
+    root.close()
+    if (barProc.running) barProc.running = false
+    barProc.command = ["omarchy", "plugin", "disable", "terminal.tetris"]
+    barProc.running = true
+  }
+
   function applyConfig(raw) {
     var data = {}
     try { data = JSON.parse(raw || "{}") } catch (e) { data = {} }
@@ -128,6 +135,10 @@ Panel {
 
   Process {
     id: previewProc
+  }
+
+  Process {
+    id: barProc
   }
 
   KeyboardPanel {
@@ -290,6 +301,16 @@ Panel {
             root.musicMuted = !root.musicMuted
             root.persist()
           }
+        }
+
+        PanelSeparator { foreground: root.contentForeground }
+
+        Button {
+          width: parent.width
+          text: "Remove from bar"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.removeFromBar()
         }
       }
     }

@@ -1177,6 +1177,8 @@ class App:
         self.celebrate_until = 0.0
         self.vol_flash_until = 0.0
         self.vol_flash = "game"
+        self.bar_note = ""
+        self.bar_note_until = 0.0
 
     def start_mode(self, mode: str) -> None:
         self.game = Game(mode)
@@ -1256,6 +1258,7 @@ class App:
                     "n": "sound",
                     "t": "theme",
                     "b": "look",
+                    "i": "baricon",
                     "m": "mute",
                     "[": "sfx-",
                     "]": "sfx+",
@@ -1288,6 +1291,8 @@ class App:
                 self.settings.cycle_theme()
             elif key in ("look", "b", "left", "right"):
                 self.settings.cycle_look(-1 if key == "left" else 1)
+            elif key in ("baricon", "i"):
+                self.put_bar_icon()
             elif key in ("mute", "m"):
                 self.settings.toggle_music()
             elif key in ("sfx-", "["):
@@ -1398,6 +1403,28 @@ class App:
                 self.page = "menu"
                 return
 
+    def put_bar_icon(self) -> None:
+        cmd = ["omarchy", "bar", "put", "terminal.tetris"]
+        try:
+            result = subprocess.run(
+                cmd,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=4,
+                text=True,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            self.bar_note = "could not reach the bar"
+            self.bar_note_until = time.monotonic() + 2.0
+            return
+        if result.returncode == 0:
+            self.bar_note = "icon is on the bar"
+        else:
+            err = (result.stderr or result.stdout or "").strip().split("\n")[0]
+            self.bar_note = (err[:42] if err else "could not add the icon")
+        self.bar_note_until = time.monotonic() + 2.0
+
     def record_if_needed(self) -> None:
         game = self.game
         if game is None or game.saved:
@@ -1410,7 +1437,7 @@ class App:
                 game.saved = True
 
     def min_size(self) -> tuple[int, int]:
-        return (64, 28) if self.page == "menu" else (56, 24)
+        return (64, 29) if self.page == "menu" else (56, 24)
 
     def celebrating(self, mode: str) -> bool:
         return self.celebrate_mode == mode and time.monotonic() < self.celebrate_until
@@ -1479,7 +1506,7 @@ class App:
         selected_mode = MODES[self.menu_index]
         board = self.scores.rows(selected_mode)
         board_h = max(1, len(board))
-        height = 21 + board_h
+        height = 22 + board_h
         top = max(1, (rows - height) // 2)
         canvas = [[(" ", theme.fg, bg) for _ in range(cols)] for _ in range(rows)]
 
@@ -1593,7 +1620,15 @@ class App:
             put_str(left + max(0, (card_w - len(empty)) // 2), board_y + 1, empty, theme.muted, bg)
 
         hint = "enter   ←→ look   t music   m mute   [ ] game   - = music   q"
-        put_str(left + max(0, (card_w - len(hint)) // 2), min(rows - 1, board_y + board_h + 2), hint, theme.muted, bg)
+        hint_y = min(rows - 2, board_y + board_h + 2)
+        put_str(left + max(0, (card_w - len(hint)) // 2), hint_y, hint, theme.muted, bg)
+        if time.monotonic() < self.bar_note_until and self.bar_note:
+            bar_hint = self.bar_note
+            ink = theme.accent
+        else:
+            bar_hint = "i   put the Tetris icon on the bar"
+            ink = theme.muted
+        put_str(left + max(0, (card_w - len(bar_hint)) // 2), min(rows - 1, hint_y + 1), bar_hint, ink, bg)
         return self.paint_canvas(canvas)
 
     def draw_play(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
