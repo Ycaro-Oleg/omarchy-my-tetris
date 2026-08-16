@@ -1,21 +1,20 @@
 {
   "schemaVersion": 1,
-  "id": "ycarooleg.tetris",
+  "id": "terminal.tetris",
   "name": "Tetris",
-  "version": "1.0.0",
-  "author": "Ycaro-Oleg",
+  "version": "1.1.0",
+  "author": "Omarchy Tetris",
   "license": "MIT",
   "description": "Theme-aware terminal Tetris with Classic, Sprint, and Ultra modes.",
   "kinds": [
     "bar-widget"
   ],
-  "activation": "on-demand",
   "entryPoints": {
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "Tetris",
-    "description": "Open terminal Tetris in the current Omarchy theme.",
+    "description": "Play Tetris in a terminal that follows the current Omarchy theme.",
     "category": "Fun",
     "aliases": [
       "tetris",
