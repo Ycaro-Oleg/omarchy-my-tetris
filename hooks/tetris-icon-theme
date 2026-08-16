@@ -1,0 +1,24 @@
+#!/bin/bash
+# Copy the contrasting Tetris launcher icon after a theme change.
+set -euo pipefail
+
+plugin="${HOME}/.config/omarchy/plugins/terminal.tetris"
+colors="${HOME}/.local/state/omarchy/current/theme/colors.toml"
+dest_dir="${HOME}/.local/share/icons/hicolor/scalable/apps"
+dest="${dest_dir}/omarchy-tetris.svg"
+
+[[ -d $plugin ]] || exit 0
+mkdir -p "$dest_dir"
+
+mode="dark"
+if [[ -f $colors ]]; then
+  mode=$(awk -F'"' '/^mode[[:space:]]*=/ {print $2; exit}' "$colors")
+fi
+
+src="${plugin}/icon-white.svg"
+if [[ ${mode} == light ]]; then
+  src="${plugin}/icon.svg"
+fi
+[[ -f $src ]] || exit 0
+cp "$src" "$dest"
+gtk-update-icon-cache -f "${HOME}/.local/share/icons/hicolor" >/dev/null 2>&1 || true

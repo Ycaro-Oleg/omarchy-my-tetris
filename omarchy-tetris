@@ -1607,6 +1607,22 @@ class App:
         put_str(mid(extra), y + 2, extra, theme.muted, bg)
         y += 4
 
+        heading = f"board  ·  {MODE_LABEL[selected_mode]}"
+        put_str(mid(heading), y, heading, theme.muted, bg)
+        y += 1
+        if board:
+            for index, row in enumerate(board):
+                mark = "♔ " if index == 0 else f"{index + 1}  "
+                line = f"{mark}{score_line(selected_mode, row)}"
+                color = theme.accent if index == 0 else theme.muted
+                put_str(mid(line), y + index, line[:card_w], color, bg)
+            y += board_h
+        else:
+            empty = "no games yet"
+            put_str(mid(empty), y, empty, theme.muted, bg)
+            y += 1
+        y += 2
+
         binds = (
             ("enter", "start", "q", "quit"),
             ("↑ ↓", "mode", "← →", "look"),
@@ -1627,20 +1643,6 @@ class App:
         for line in formatted:
             put_str(bind_x, y, line, theme.muted, bg)
             y += 1
-        y += 1
-
-        heading = f"board  ·  {MODE_LABEL[selected_mode]}"
-        put_str(mid(heading), y, heading, theme.muted, bg)
-        y += 1
-        if board:
-            for index, row in enumerate(board):
-                mark = "♔ " if index == 0 else f"{index + 1}  "
-                line = f"{mark}{score_line(selected_mode, row)}"
-                color = theme.accent if index == 0 else theme.muted
-                put_str(mid(line), y + index, line[:card_w], color, bg)
-        else:
-            empty = "no games yet"
-            put_str(mid(empty), y, empty, theme.muted, bg)
         return self.paint_canvas(canvas)
 
     def draw_play(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:

@@ -2,7 +2,7 @@
 
 A small terminal Tetris for [Omarchy](https://omarchy.org/). The board follows the theme you already have selected. Pieces default to NES-style beveled tiles. Cycle looks on the menu with ← → (or `b` in a game) and a T-piece preview updates as you go: **NES**, **flat**, **brick**, and **blocks**. A landing sound plays when a piece first sits on the stack, a chime plays when lines clear, and one of three Korobeiniki arrangements loops underneath. Game sounds and music have separate volume bars. `m` mutes only the music.
 
-The game opens as a normal tiled window, so it joins whatever layout you are already using. Move and resize it with your usual keys.
+The game opens as a normal tiled window, so it joins whatever layout you are already using. Move and resize it with your usual keys. The bar and launcher marks switch between `icon.svg` (black) and `icon-white.svg` from the theme mode.
 
 ## Install
 
