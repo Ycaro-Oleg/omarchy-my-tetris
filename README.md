@@ -10,10 +10,10 @@ The game opens as a normal tiled window, so it joins whatever layout you are alr
 omarchy plugin add https://github.com/Ycaro-Oleg/omarchy-my-tetris.git --enable
 ```
 
-That clones the repo into `~/.config/omarchy/plugins/terminal.tetris/`. Click the bar icon to open the panel, then Play. Or run the game directly:
+That clones the repo into `~/.config/omarchy/plugins/terminal.tetris/`. Click the bar icon to open the panel, then Play. In a terminal, type `tetris` to play in that same session:
 
 ```sh
-~/.config/omarchy/plugins/terminal.tetris/omarchy-tetris
+tetris
 ```
 
 ## Usage
