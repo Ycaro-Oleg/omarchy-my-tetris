@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -23,6 +24,7 @@ Panel {
   property int soundVolume: 55
   property int musicVolume: 15
   property string theme: "piano"
+  property string look: "nes"
   property bool musicMuted: false
   readonly property var soundOptions: [
     { value: "thock", label: "Thock" },
@@ -34,6 +36,12 @@ Panel {
     { value: "piano", label: "Piano" },
     { value: "strings", label: "Strings" },
     { value: "music-box", label: "Box" }
+  ]
+  readonly property var lookOptions: [
+    { value: "nes", label: "NES" },
+    { value: "flat", label: "Flat" },
+    { value: "brick", label: "Brick" },
+    { value: "blocks", label: "Blocks" }
   ]
 
   function open() {
@@ -62,6 +70,13 @@ Panel {
     root.bar.run("omarchy-launch-or-focus-tui --app-id=org.omarchy.tetris " + root.gamePath)
   }
 
+  function removeFromBar() {
+    root.close()
+    if (barProc.running) barProc.running = false
+    barProc.command = ["omarchy", "plugin", "disable", "terminal.tetris"]
+    barProc.running = true
+  }
+
   function applyConfig(raw) {
     var data = {}
     try { data = JSON.parse(raw || "{}") } catch (e) { data = {} }
@@ -76,6 +91,11 @@ Panel {
     for (var j = 0; j < themeOptions.length; j++)
       if (themeOptions[j].value === nextTheme) themeOk = true
     root.theme = themeOk ? nextTheme : "piano"
+    var nextLook = String(data.look || "nes")
+    var lookOk = false
+    for (var k = 0; k < lookOptions.length; k++)
+      if (lookOptions[k].value === nextLook) lookOk = true
+    root.look = lookOk ? nextLook : "nes"
     root.musicMuted = data.music_muted === true
     var legacy = parseInt(data.volume, 10)
     var nextSoundVol = parseInt(data.sound_volume, 10)
@@ -91,6 +111,7 @@ Panel {
       sound_volume: root.soundVolume,
       music_volume: root.musicVolume,
       theme: root.theme,
+      look: root.look,
       music_muted: root.musicMuted
     }, null, 2) + "\n"
     configFile.setText(payload)
@@ -117,6 +138,10 @@ Panel {
     id: previewProc
   }
 
+  Process {
+    id: barProc
+  }
+
   KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
@@ -125,7 +150,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(320))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(560))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -135,10 +160,21 @@ Panel {
       Keys.onReturnPressed: root.play()
       Keys.onEnterPressed: root.play()
 
-      Column {
-        id: content
-        width: parent.width
-        spacing: Style.space(10)
+      Flickable {
+        id: panelFlick
+        anchors.fill: parent
+        contentWidth: width
+        contentHeight: content.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        interactive: contentHeight > height
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        Column {
+          id: content
+          width: panelFlick.width
+          spacing: Style.space(10)
 
         PanelHero {
           title: "Tetris"
@@ -154,6 +190,21 @@ Panel {
           }
         }
 
+        PanelSectionHeader {
+          text: "Bar"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+        }
+
+        Button {
+          width: parent.width
+          text: "Remove from bar"
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.removeFromBar()
+        }
+
         Button {
           width: parent.width
           text: "Play"
@@ -163,6 +214,26 @@ Panel {
         }
 
         PanelSeparator { foreground: root.contentForeground }
+
+        PanelSectionHeader {
+          text: "Look"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+        }
+
+        ButtonGroup {
+          width: parent.width
+          options: root.lookOptions
+          value: root.look
+          foreground: root.contentForeground
+          background: root.bar ? root.bar.background : Color.background
+          accent: Color.accent
+          fontFamily: root.contentFontFamily
+          onChanged: function(next) {
+            root.look = next
+            root.persist()
+          }
+        }
 
         PanelSectionHeader {
           text: "Landing"
@@ -257,6 +328,7 @@ Panel {
             root.musicMuted = !root.musicMuted
             root.persist()
           }
+        }
         }
       }
     }
