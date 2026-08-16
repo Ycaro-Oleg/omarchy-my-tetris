@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import array
 import json
-import math
 import os
 import random
 import re
@@ -36,7 +35,6 @@ MUSIC_THEMES = ("piano", "strings", "music-box")
 MUSIC_LABEL = {"piano": "piano", "strings": "strings", "music-box": "music box"}
 CARD_W = 46
 BOARD_ROWS = 4
-FIRE_GLYPHS = " .:+=*#%@"
 
 FALLBACK = {
     "mode": "dark",
@@ -210,12 +208,6 @@ class Theme:
     @property
     def muted(self) -> tuple[int, int, int]:
         return self.rgb("muted")
-
-    @property
-    def grid_ink(self) -> tuple[int, int, int]:
-        if self.mode == "light":
-            return (24, 22, 20)
-        return (244, 240, 232)
 
     @property
     def accent(self) -> tuple[int, int, int]:
@@ -534,7 +526,12 @@ class Music:
         self.lock = threading.Lock()
 
     def path_for(self, theme: str) -> Path:
-        return ROOT / "sounds" / "themes" / f"{theme}.mp3"
+        base = ROOT / "sounds" / "themes" / theme
+        for ext in (".opus", ".ogg", ".mp3"):
+            path = base.with_suffix(ext)
+            if path.is_file():
+                return path
+        return base.with_suffix(".opus")
 
     def gain(self) -> float:
         if self.settings.music_muted or self.settings.music_volume <= 0:
@@ -1016,7 +1013,7 @@ class Game:
                 count = len(self.clearing)
                 self.board.clear_rows(self.clearing)
                 self.clearing = []
-                self.apply_clear(count, getattr(self, "pending_tspin", False))
+                self.apply_clear(count, self.pending_tspin)
                 if self.alive:
                     self.piece = self.spawn()
             return
@@ -1108,37 +1105,6 @@ def score_line(mode: str, row: dict) -> str:
     return f"{name:<12}  {value:>8}  {when}"
 
 
-class Ember:
-    def __init__(self, width: int, height: int) -> None:
-        self.w = max(8, width)
-        self.h = max(3, height)
-        self.heat = [0.0] * (self.w * self.h)
-
-    def step(self, now: float) -> None:
-        w, h = self.w, self.h
-        for x in range(w):
-            self.heat[(h - 1) * w + x] = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(now * 9.0 + x * 0.55))
-        for y in range(h - 1):
-            for x in range(w):
-                below = self.heat[(y + 1) * w + x]
-                left = self.heat[(y + 1) * w + max(0, x - 1)]
-                right = self.heat[(y + 1) * w + min(w - 1, x + 1)]
-                self.heat[y * w + x] = (below * 0.46 + left * 0.27 + right * 0.27) * 0.88
-
-    def cell(self, x: int, y: int, theme: Theme) -> tuple[str, tuple[int, int, int]]:
-        value = self.heat[y * self.w + x]
-        index = min(len(FIRE_GLYPHS) - 1, max(0, int(value * len(FIRE_GLYPHS))))
-        if value < 0.18:
-            color = theme.muted
-        elif value < 0.42:
-            color = theme.rgb("red")
-        elif value < 0.7:
-            color = theme.rgb("orange")
-        else:
-            color = theme.rgb("yellow")
-        return FIRE_GLYPHS[index], color
-
-
 def term_size() -> tuple[int, int]:
     try:
         size = os.get_terminal_size()
@@ -1154,16 +1120,6 @@ class Screen:
 
     def refresh_size(self) -> None:
         self.cols, self.rows = term_size()
-
-    def cell(self, color: tuple[int, int, int], ghost: bool = False) -> str:
-        if ghost:
-            body = mix(color, self.theme.well, 0.38)
-            return paint("░░", body, self.theme.well)
-        return paint("  ", self.theme.fg, color)
-
-    def blank_well(self, x: int, y: int) -> str:
-        shade = self.theme.well_alt if (x + y) % 2 else self.theme.well
-        return paint("  ", self.theme.fg, shade)
 
     def fill_line(self, width: int, bg: tuple[int, int, int]) -> str:
         return paint(" " * width, self.theme.fg, bg) + RESET
@@ -1185,7 +1141,6 @@ class App:
         self.buf = bytearray()
         self.celebrate_mode: Optional[str] = None
         self.celebrate_until = 0.0
-        self.ember = Ember(CARD_W, 3)
         self.vol_flash_until = 0.0
         self.vol_flash = "game"
 
@@ -1602,13 +1557,14 @@ class App:
                 put(x + 1, y, " ", theme.fg, color)
                 return
             if ghost:
-                ink = mix(theme.grid_ink, theme.well, 0.45)
-                put(x, y, "[", ink, theme.well)
-                put(x + 1, y, "]", ink, theme.well)
+                body = mix(color, theme.well, 0.32)
+                put(x, y, " ", theme.fg, mix((255, 255, 255), body, 0.14))
+                put(x + 1, y, " ", theme.fg, mix((0, 0, 0), body, 0.12))
                 return
-            ink = theme.grid_ink
-            put(x, y, "[", ink, color)
-            put(x + 1, y, "]", ink, color)
+            shine = mix((255, 255, 255), color, 0.34)
+            shade = mix((0, 0, 0), color, 0.26)
+            put(x, y, "▀", shine, color)
+            put(x + 1, y, "▄", shade, color)
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)

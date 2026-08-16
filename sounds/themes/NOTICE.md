@@ -6,9 +6,9 @@ These recordings are **Tetris Theme – Korobeiniki – Rearranged** by
 
 | File | Arrangement |
 |---|---|
-| `piano.mp3` | Arranged for Piano |
-| `strings.mp3` | Arranged for Strings |
-| `music-box.mp3` | Arranged for Music Box |
+| `piano.opus` | Arranged for Piano |
+| `strings.opus` | Arranged for Strings |
+| `music-box.opus` | Arranged for Music Box |
 
 © 2024 Gregor Quendel.
 
@@ -18,5 +18,5 @@ You may share and adapt the recordings for non-commercial use if you keep this c
 and the license link. You may not use them in a paid product or other commercial work
 without a [commercial license](https://www.classicals.de/) from the author.
 
-This plugin only trims leading and trailing silence and crossfades the loop point
-so playback can repeat without a gap. The arrangements themselves are unchanged.
+This plugin uses a short loop taken from each recording, encoded as Opus, then
+trims silence and crossfades the join so playback can repeat without a gap.
