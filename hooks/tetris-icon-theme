@@ -1,24 +1,45 @@
 #!/bin/bash
-# Copy the contrasting Tetris launcher icon after a theme change.
+# Point the Tetris launcher at the contrasting SVG after a theme change.
 set -euo pipefail
 
 plugin="${HOME}/.config/omarchy/plugins/terminal.tetris"
 colors="${HOME}/.local/state/omarchy/current/theme/colors.toml"
-dest_dir="${HOME}/.local/share/icons/hicolor/scalable/apps"
-dest="${dest_dir}/omarchy-tetris.svg"
+icon_dir="${HOME}/.local/share/icons/hicolor"
+desktop="${HOME}/.local/share/applications/Tetris.desktop"
 
 [[ -d $plugin ]] || exit 0
-mkdir -p "$dest_dir"
 
 mode="dark"
 if [[ -f $colors ]]; then
   mode=$(awk -F'"' '/^mode[[:space:]]*=/ {print $2; exit}' "$colors")
 fi
 
-src="${plugin}/icon-white.svg"
 if [[ ${mode} == light ]]; then
   src="${plugin}/icon.svg"
+else
+  src="${plugin}/icon-white.svg"
 fi
 [[ -f $src ]] || exit 0
-cp "$src" "$dest"
-gtk-update-icon-cache -f "${HOME}/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+
+mkdir -p "${icon_dir}/scalable/apps" "${icon_dir}/256x256/apps"
+cp "$src" "${icon_dir}/scalable/apps/omarchy-tetris.svg"
+if command -v magick >/dev/null; then
+  magick -background none "$src" -resize 256x256 "${icon_dir}/256x256/apps/omarchy-tetris.png" 2>/dev/null || true
+elif command -v rsvg-convert >/dev/null; then
+  rsvg-convert -w 256 -h 256 "$src" -o "${icon_dir}/256x256/apps/omarchy-tetris.png" 2>/dev/null || true
+fi
+gtk-update-icon-cache -f "${icon_dir}" >/dev/null 2>&1 || true
+
+rewrite_desktop() {
+  local file=$1
+  [[ -f $file ]] || return 0
+  if grep -q '^Icon=' "$file"; then
+    sed -i "s|^Icon=.*|Icon=${src}|" "$file"
+  else
+    printf '\nIcon=%s\n' "$src" >> "$file"
+  fi
+}
+
+rewrite_desktop "$desktop"
+update-desktop-database "${HOME}/.local/share/applications" >/dev/null 2>&1 || true
+omarchy menu refresh >/dev/null 2>&1 || true
