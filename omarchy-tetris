@@ -1250,64 +1250,31 @@ class App:
         ready, _, _ = select.select([sys.stdin], [], [], timeout)
         if ready:
             try:
-                chunk = os.read(sys.stdin.fileno(), 512)
+                chunk = os.read(sys.stdin.fileno(), 256)
             except OSError:
                 chunk = b""
             self.buf.extend(chunk)
-        elif bytes(self.buf) == b"\x1b":
-            self.buf.clear()
-            return ["esc"]
         data = bytes(self.buf)
         self.buf.clear()
         i = 0
-        names = {
-            "a": "left",
-            "d": "right",
-            "s": "down",
-            "w": "up",
-            "x": "up",
-            "z": "ccw",
-            "c": "hold",
-            "p": "pause",
-            "q": "quit",
-            "r": "retry",
-            "h": "left",
-            "l": "right",
-            "j": "down",
-            "k": "up",
-            "n": "sound",
-            "t": "theme",
-            "b": "look",
-            "i": "baroff",
-            "u": "baron",
-            "m": "mute",
-            "[": "sfx-",
-            "]": "sfx+",
-            "-": "mus-",
-            "_": "mus-",
-            "=": "mus+",
-            "+": "mus+",
-            ",": "mus-",
-            ".": "mus+",
-        }
         while i < len(data):
             b = data[i]
             if b == 0x1B:
                 if i + 1 >= len(data):
                     self.buf.extend(data[i:])
                     break
-                nxt = data[i + 1]
-                if nxt == ord("[") and i + 2 < len(data) and data[i + 2] == ord("<"):
+                if data[i + 1] == ord("[") and i + 2 < len(data) and data[i + 2] == ord("<"):
                     j = i + 3
                     while j < len(data) and data[j] not in (ord("M"), ord("m")):
                         j += 1
                     if j >= len(data):
                         self.buf.extend(data[i:])
                         break
-                    parts = data[i + 3 : j].decode("ascii", "replace").split(";")
+                    body = data[i + 3 : j].decode("ascii", "replace")
+                    parts = body.split(";")
                     if len(parts) == 3:
                         try:
-                            btn, mx, my = int(parts[0]), int(parts[1]), int(parts[2])
+                            btn, mx, my = (int(parts[0]), int(parts[1]), int(parts[2]))
                         except ValueError:
                             btn, mx, my = -1, 0, 0
                         if mx > 0 and my > 0:
@@ -1316,36 +1283,20 @@ class App:
                             keys.append("click")
                     i = j + 1
                     continue
-                if nxt == ord("[") and i + 2 < len(data) and data[i + 2] == ord("M"):
-                    if i + 5 > len(data):
-                        self.buf.extend(data[i:])
-                        break
-                    btn, mx, my = data[i + 3] - 32, data[i + 4] - 32, data[i + 5] - 32
-                    if mx > 0 and my > 0:
-                        self.mouse = (mx - 1, my - 1)
-                    if btn == 0:
-                        keys.append("click")
-                    i += 6
+                if i + 2 < len(data) and data[i + 1] == ord("["):
+                    code = data[i + 2]
+                    if 0x40 <= code <= 0x7E:
+                        mapping = {ord("A"): "up", ord("B"): "down", ord("C"): "right", ord("D"): "left"}
+                        keys.append(mapping.get(code, "esc"))
+                        i += 3
+                        continue
+                    self.buf.extend(data[i:])
+                    break
+                if i + 1 == len(data):
+                    keys.append("esc")
+                    i += 1
                     continue
-                if nxt == ord("["):
-                    j = i + 2
-                    while j < len(data) and not (0x40 <= data[j] <= 0x7E):
-                        j += 1
-                    if j >= len(data):
-                        self.buf.extend(data[i:])
-                        break
-                    final = data[j]
-                    arrows = {ord("A"): "up", ord("B"): "down", ord("C"): "right", ord("D"): "left"}
-                    if final in arrows:
-                        keys.append(arrows[final])
-                    i = j + 1
-                    continue
-                if nxt == ord("O") and i + 2 < len(data):
-                    arrows = {ord("A"): "up", ord("B"): "down", ord("C"): "right", ord("D"): "left"}
-                    if data[i + 2] in arrows:
-                        keys.append(arrows[data[i + 2]])
-                    i += 3
-                    continue
+                keys.append("esc")
                 i += 1
                 continue
             if b in (3,):
@@ -1356,8 +1307,38 @@ class App:
                 keys.append("space")
             elif b in (127, 8):
                 keys.append("back")
-            elif 32 < b < 127:
+            else:
                 ch = chr(b).lower()
+                names = {
+                    "a": "left",
+                    "d": "right",
+                    "s": "down",
+                    "w": "up",
+                    "x": "up",
+                    "z": "ccw",
+                    "c": "hold",
+                    "p": "pause",
+                    "q": "quit",
+                    "r": "retry",
+                    "h": "left",
+                    "l": "right",
+                    "j": "down",
+                    "k": "up",
+                    "n": "sound",
+                    "t": "theme",
+                    "b": "look",
+                    "i": "baroff",
+                    "u": "baron",
+                    "m": "mute",
+                    "[": "sfx-",
+                    "]": "sfx+",
+                    "-": "mus-",
+                    "_": "mus-",
+                    "=": "mus+",
+                    "+": "mus+",
+                    ",": "mus-",
+                    ".": "mus+",
+                }
                 keys.append(names.get(ch, ch))
             i += 1
         return keys
@@ -1376,11 +1357,9 @@ class App:
                 self.menu_index = (self.menu_index + 1) % len(MODES)
             elif key in ("enter", "space"):
                 self.start_mode(MODES[self.menu_index])
-                return
             elif key in ("1", "2", "3"):
                 self.menu_index = int(key) - 1
                 self.start_mode(MODES[self.menu_index])
-                return
             elif key in ("sound", "n"):
                 self.settings.cycle_sound()
                 self.sound.play()
