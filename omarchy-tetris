@@ -6,7 +6,9 @@ import os
 import random
 import re
 import select
+import shutil
 import signal
+import subprocess
 import sys
 import termios
 import time
@@ -22,9 +24,11 @@ TICK = 1.0 / 30.0
 LOCK_MS = 500
 MAX_LOCK_RESETS = 15
 FLASH_MS = 140
+ROOT = Path(__file__).resolve().parent
 THEME_PATH = Path.home() / ".local/state/omarchy/current/theme/colors.toml"
-THEME_NAME_PATH = Path.home() / ".local/state/omarchy/current/theme.name"
 SCORE_PATH = Path.home() / ".local/share/omarchy-tetris/scores.json"
+CONFIG_PATH = Path.home() / ".local/state/omarchy/tetris.json"
+SOUND_VOICES = ("thock", "click", "chip", "hush")
 
 FALLBACK = {
     "mode": "dark",
@@ -158,7 +162,6 @@ def parse_toml_colors(path: Path) -> dict[str, str]:
 
 class Theme:
     def __init__(self) -> None:
-        self.name = "default"
         self.mtime = -1.0
         self.mode = "dark"
         self.colors: dict[str, tuple[int, int, int]] = {}
@@ -178,10 +181,6 @@ class Theme:
         self.mtime = mtime
         self.mode = raw.get("mode", "dark")
         self.colors = {key: hex_rgb(value) for key, value in raw.items() if key != "mode"}
-        try:
-            self.name = THEME_NAME_PATH.read_text(encoding="utf-8").strip() or "theme"
-        except OSError:
-            self.name = THEME_PATH.parent.name if THEME_PATH.exists() else "theme"
         return True
 
     @property
@@ -341,6 +340,102 @@ class Scores:
         return rows[0] if rows else None
 
 
+class Settings:
+    def __init__(self) -> None:
+        self.sound = "thock"
+        self.volume = 55
+        self.mtime = -1.0
+        self.load()
+
+    def load(self) -> bool:
+        try:
+            mtime = CONFIG_PATH.stat().st_mtime if CONFIG_PATH.is_file() else -1.0
+        except OSError:
+            mtime = -1.0
+        if mtime == self.mtime and mtime != -1.0:
+            return False
+        self.mtime = mtime
+        try:
+            raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        if not isinstance(raw, dict):
+            raw = {}
+        voice = str(raw.get("sound", "thock"))
+        self.sound = voice if voice in SOUND_VOICES else "thock"
+        try:
+            self.volume = max(0, min(100, int(raw.get("volume", 55))))
+        except (TypeError, ValueError):
+            self.volume = 55
+        return True
+
+    def save(self) -> None:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CONFIG_PATH.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps({"sound": self.sound, "volume": self.volume}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tmp.replace(CONFIG_PATH)
+        try:
+            self.mtime = CONFIG_PATH.stat().st_mtime
+        except OSError:
+            pass
+
+    def cycle_sound(self) -> str:
+        index = SOUND_VOICES.index(self.sound) if self.sound in SOUND_VOICES else 0
+        self.sound = SOUND_VOICES[(index + 1) % len(SOUND_VOICES)]
+        self.save()
+        return self.sound
+
+    def nudge_volume(self, delta: int) -> int:
+        self.volume = max(0, min(100, self.volume + delta))
+        self.save()
+        return self.volume
+
+
+class Sound:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.player = self._player()
+        self.child: Optional[subprocess.Popen] = None
+
+    def _player(self) -> Optional[list[str]]:
+        for name in ("pw-play", "paplay", "aplay"):
+            path = shutil.which(name)
+            if path:
+                return [path]
+        return None
+
+    def path_for(self, voice: str) -> Path:
+        return ROOT / "sounds" / f"{voice}.wav"
+
+    def play(self, voice: Optional[str] = None) -> None:
+        if self.player is None or self.settings.volume <= 0:
+            return
+        chosen = voice or self.settings.sound
+        path = self.path_for(chosen)
+        if not path.is_file():
+            return
+        command = list(self.player)
+        if command[0].endswith("pw-play"):
+            command.extend(["--volume", f"{self.settings.volume / 100.0:.2f}"])
+        elif command[0].endswith("paplay"):
+            command.append(f"--volume={int(self.settings.volume / 100.0 * 65536)}")
+        command.append(str(path))
+        try:
+            if self.child and self.child.poll() is None:
+                self.child.terminate()
+            self.child = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            self.child = None
+
+
 class Game:
     def __init__(self, mode: str) -> None:
         self.mode = mode
@@ -368,6 +463,10 @@ class Game:
         self.started = time.monotonic()
         self.elapsed_ms = 0
         self.ended_at: Optional[float] = None
+        self.pending_tspin = False
+        self.pause_started = 0.0
+        self.was_grounded = False
+        self.just_landed = False
         self.piece = self.spawn()
 
     def spawn_piece(self, kind: str) -> Optional[Piece]:
@@ -387,6 +486,8 @@ class Game:
         self.last_rotate = False
         self.lock_resets = 0
         self.lock_until = 0.0
+        self.was_grounded = False
+        self.just_landed = False
         self.gravity_at = time.monotonic() + gravity_ms(self.level) / 1000.0
         if piece is None:
             self.finish(False)
@@ -433,6 +534,7 @@ class Game:
             return False
         self.piece = nxt
         self.last_rotate = False
+        self.note_landing()
         self.touch_lock(moved=True)
         return True
 
@@ -454,6 +556,7 @@ class Game:
             if self.board.fits(nxt):
                 self.piece = nxt
                 self.last_rotate = True
+                self.note_landing()
                 self.touch_lock(moved=True)
                 return True
         return False
@@ -488,6 +591,8 @@ class Game:
             self.last_rotate = False
             self.lock_resets = 0
             self.lock_until = 0.0
+            self.was_grounded = False
+            self.just_landed = False
             self.gravity_at = time.monotonic() + gravity_ms(self.level) / 1000.0
         self.hold_used = True
 
@@ -497,6 +602,17 @@ class Game:
         test = self.piece.copy()
         test.y += 1
         return not self.board.fits(test)
+
+    def note_landing(self) -> None:
+        now = self.grounded()
+        if now and not self.was_grounded:
+            self.just_landed = True
+        self.was_grounded = now
+
+    def consume_land(self) -> bool:
+        hit = self.just_landed
+        self.just_landed = False
+        return hit
 
     def touch_lock(self, moved: bool) -> None:
         if not self.grounded():
@@ -601,9 +717,6 @@ class Game:
             self.pause_started = time.monotonic()
             self.paused = True
 
-    pending_tspin = False
-    pause_started = 0.0
-
 
 def ansi_fg(rgb: tuple[int, int, int]) -> str:
     return f"\x1b[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
@@ -670,6 +783,8 @@ class App:
         self.theme = Theme()
         self.screen = Screen(self.theme)
         self.scores = Scores()
+        self.settings = Settings()
+        self.sound = Sound(self.settings)
         self.page = "menu"
         self.menu_index = 0
         self.game: Optional[Game] = None
@@ -748,6 +863,13 @@ class App:
                     "l": "right",
                     "j": "down",
                     "k": "up",
+                    "n": "sound",
+                    "[": "vol-",
+                    "]": "vol+",
+                    "-": "vol-",
+                    "_": "vol-",
+                    "=": "vol+",
+                    "+": "vol+",
                 }
                 keys.append(names.get(ch, ch))
             i += 1
@@ -764,6 +886,15 @@ class App:
             elif key in ("1", "2", "3"):
                 self.menu_index = int(key) - 1
                 self.start_mode(MODES[self.menu_index])
+            elif key in ("sound", "n"):
+                self.settings.cycle_sound()
+                self.sound.play()
+            elif key in ("vol-", "[", "-"):
+                self.settings.nudge_volume(-5)
+                self.sound.play()
+            elif key in ("vol+", "]", "=", "+"):
+                self.settings.nudge_volume(5)
+                self.sound.play()
             elif key in ("quit", "esc", "q"):
                 self.running = False
 
@@ -814,6 +945,13 @@ class App:
                 game.hard_drop()
             elif key == "hold":
                 game.swap_hold()
+            elif key in ("sound", "n"):
+                self.settings.cycle_sound()
+                self.sound.play()
+            elif key in ("vol-", "[", "-"):
+                self.settings.nudge_volume(-5)
+            elif key in ("vol+", "]", "=", "+"):
+                self.settings.nudge_volume(5)
             elif key in ("retry", "r"):
                 self.record_if_needed()
                 self.start_mode(game.mode)
@@ -881,12 +1019,11 @@ class App:
         ]
         title = "  ".join(paint(ch, color, bg) for ch, color in letters)
         title_plain = "  ".join(ch for ch, _ in letters)
-        subtitle = "theme  " + theme.name
-        hint = "enter play   ↑↓ select   q quit"
+        volume = "off" if self.settings.volume <= 0 else str(self.settings.volume)
+        hint = f"enter play   n {self.settings.sound}   [ ] {volume}   q quit"
         body: list[tuple[str, tuple[int, int, int]]] = []
         body.append(("", theme.fg))
         body.append((title_plain, theme.fg))
-        body.append((subtitle, theme.muted))
         body.append(("", theme.fg))
         for i, mode in enumerate(MODES):
             selected = i == self.menu_index
@@ -961,8 +1098,6 @@ class App:
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)
-        name = theme.name
-        put_str(max(well0, cols - len(name) - 2), header_y, name, theme.muted, bg)
 
         for y in range(ROWS):
             put(well0, well_y + y, "│", theme.muted, theme.well)
@@ -1039,7 +1174,7 @@ class App:
             mini(kind, right0, well_y + i * 4)
 
         help_y = min(rows - 1, well_y + ROWS + 1)
-        help_txt = "←→ move   ↑ rotate   z ccw   space drop   c hold   p pause   q menu"
+        help_txt = "←→ move   ↑ rot   space drop   c hold   n sound   [ ] vol   p pause"
         put_str(max(0, (cols - len(help_txt)) // 2), help_y, help_txt, theme.muted, bg)
 
         overlay = ""
@@ -1119,9 +1254,12 @@ class App:
         try:
             while self.running:
                 self.theme.reload()
+                self.settings.load()
                 now = time.monotonic()
                 if self.page == "play" and self.game is not None:
                     self.game.tick(now)
+                    if self.game.consume_land():
+                        self.sound.play()
                     if not self.game.alive and not self.game.saved:
                         self.record_score()
                         self.game.saved = True
@@ -1136,7 +1274,42 @@ class App:
         return 0
 
 
+def parse_args(argv: list[str]) -> dict:
+    out = {"preview": False, "sound": None, "volume": None}
+    args = list(argv[1:])
+    while args:
+        item = args.pop(0)
+        if item in ("-h", "--help"):
+            sys.stdout.write(
+                "usage: omarchy-tetris [--preview] [--sound thock|click|chip|hush] [--volume 0-100]\n"
+            )
+            raise SystemExit(0)
+        if item == "--preview":
+            out["preview"] = True
+        elif item == "--sound" and args:
+            out["sound"] = args.pop(0)
+        elif item == "--volume" and args:
+            out["volume"] = args.pop(0)
+        else:
+            sys.stderr.write(f"unknown argument: {item}\n")
+            raise SystemExit(2)
+    return out
+
+
 def main() -> int:
+    opts = parse_args(sys.argv)
+    if opts["preview"]:
+        settings = Settings()
+        if opts["sound"]:
+            settings.sound = opts["sound"] if opts["sound"] in SOUND_VOICES else settings.sound
+        if opts["volume"] is not None:
+            try:
+                settings.volume = max(0, min(100, int(opts["volume"])))
+            except ValueError:
+                pass
+        Sound(settings).play()
+        time.sleep(0.18)
+        return 0
     return App().run()
 
 

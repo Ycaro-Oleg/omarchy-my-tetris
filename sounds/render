@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+import math
+import struct
+import wave
+from pathlib import Path
+
+RATE = 22050
+OUT = Path(__file__).resolve().parent
+
+
+def noise(i):
+    return ((i * 1103515245 + 12345) & 0x7FFFFFFF) / 0x7FFFFFFF * 2.0 - 1.0
+
+
+def clamp(x):
+    return max(-1.0, min(1.0, x))
+
+
+def quantize(x, bits):
+    steps = float((1 << (bits - 1)) - 1)
+    return round(clamp(x) * steps) / steps
+
+
+def write_wav(name, samples):
+    path = OUT / name
+    with wave.open(str(path), "w") as fh:
+        fh.setnchannels(1)
+        fh.setsampwidth(2)
+        fh.setframerate(RATE)
+        fh.writeframes(b"".join(struct.pack("<h", int(clamp(s) * 28000)) for s in samples))
+
+
+def thock():
+    samples = []
+    for i in range(int(RATE * 0.092)):
+        t = i / RATE
+        e = math.exp(-t * 34)
+        body = math.sin(2 * math.pi * 156 * t) * 0.52 + math.sin(2 * math.pi * 84 * t) * 0.38
+        tick = math.sin(2 * math.pi * 640 * t) * math.exp(-t * 78) * 0.16
+        air = noise(i) * math.exp(-t * 62) * 0.10
+        samples.append(quantize(body * e + tick + air, 7))
+    return samples
+
+
+def click():
+    samples = []
+    for i in range(int(RATE * 0.048)):
+        t = i / RATE
+        high = math.sin(2 * math.pi * 1840 * t) * math.exp(-t * 86) * 0.28
+        mid = math.sin(2 * math.pi * 410 * t) * math.exp(-t * 48) * 0.34
+        kiss = noise(i + 17) * math.exp(-t * 110) * 0.08
+        samples.append(quantize(high + mid + kiss, 8))
+    return samples
+
+
+def chip():
+    samples = []
+    n = int(RATE * 0.078)
+    for i in range(n):
+        t = i / RATE
+        freq = 390.0 - 140.0 * (t / 0.078)
+        phase = 2 * math.pi * freq * t
+        square = 0.28 * math.sin(phase) + 0.09 * math.sin(3 * phase)
+        e = math.exp(-t * 28) * (1.0 - math.exp(-t * 220))
+        samples.append(quantize(square * e, 6))
+    return samples
+
+
+def hush():
+    samples = []
+    prev = 0.0
+    for i in range(int(RATE * 0.11)):
+        t = i / RATE
+        white = noise(i + 91)
+        prev = prev * 0.82 + white * 0.18
+        tap = (white - prev) * 0.55 + prev * 0.22
+        e = math.exp(-t * 26) * min(1.0, t * 90)
+        samples.append(quantize(tap * e * 0.7, 8))
+    return samples
+
+
+if __name__ == "__main__":
+    write_wav("thock.wav", thock())
+    write_wav("click.wav", click())
+    write_wav("chip.wav", chip())
+    write_wav("hush.wav", hush())
