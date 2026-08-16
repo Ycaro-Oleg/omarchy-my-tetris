@@ -1407,7 +1407,20 @@ class App:
                 return
 
     def set_bar_icon(self, on: bool) -> None:
-        cmd = ["omarchy", "bar", "put", "terminal.tetris"] if on else ["omarchy", "plugin", "disable", "terminal.tetris"]
+        cmd = (
+            [
+                "omarchy",
+                "bar",
+                "put",
+                "terminal.tetris",
+                "--section",
+                "center",
+                "--before",
+                "omarchy.indicators",
+            ]
+            if on
+            else ["omarchy", "plugin", "disable", "terminal.tetris"]
+        )
         try:
             result = subprocess.run(
                 cmd,
@@ -1440,7 +1453,7 @@ class App:
                 game.saved = True
 
     def min_size(self) -> tuple[int, int]:
-        return (56, 26) if self.page == "menu" else (56, 24)
+        return (60, 30) if self.page == "menu" else (56, 24)
 
     def celebrating(self, mode: str) -> bool:
         return self.celebrate_mode == mode and time.monotonic() < self.celebrate_until
@@ -1503,12 +1516,12 @@ class App:
 
     def draw_menu(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
         theme = self.theme
-        card_w = min(40, max(32, cols - 6))
+        card_w = min(46, max(36, cols - 6))
         left = max(0, (cols - card_w) // 2)
         selected_mode = MODES[self.menu_index]
         board = self.scores.rows(selected_mode)
         board_h = max(1, len(board))
-        height = 20 + board_h
+        height = 26 + board_h
         top = max(1, (rows - height) // 2)
         canvas = [[(" ", theme.fg, bg) for _ in range(cols)] for _ in range(rows)]
         well = theme.well
@@ -1545,13 +1558,10 @@ class App:
             selected = i == self.menu_index
             label = f"{'▸ ' if selected else '  '}{MODE_LABEL[mode]}"
             put_str(mid(label), y, label, theme.accent if selected else theme.muted, bg)
-            y += 1
-            if selected:
-                blurb = MODE_BLURB[mode]
-                put_str(mid(blurb), y, blurb[:card_w], theme.fg, bg)
-                y += 1
+            blurb = MODE_BLURB[mode]
+            put_str(mid(blurb), y + 1, blurb[:card_w], theme.fg if selected else theme.muted, bg)
+            y += 3
 
-        y += 1
         look = self.settings.look if self.settings.look in LOOKS else "nes"
         look_txt = f"look   ◂ {LOOK_LABEL[look]} ▸"
         put_str(mid(look_txt), y, "look   ", theme.muted, bg)
@@ -1576,13 +1586,15 @@ class App:
             )
         y += 3
 
+        bar_w = 14
+
         def draw_bar(row: int, label: str, value: int) -> None:
-            bar = volume_bar(value, 12)
-            percent = "off" if value <= 0 else f"{value}%"
-            text = f"{label}  {bar}  {percent}"
+            bar = volume_bar(value, bar_w)
+            percent = " off" if value <= 0 else f"{value:>3}%"
+            text = f"{label:<5}  {bar}  {percent}"
             x = mid(text)
-            put_str(x, row, f"{label}  ", theme.muted, bg)
-            bx = x + len(label) + 2
+            put_str(x, row, f"{label:<5}  ", theme.muted, bg)
+            bx = x + 7
             for i, ch in enumerate(bar):
                 put(bx + i, row, ch, theme.accent if ch == "█" else theme.muted, bg)
             put_str(bx + len(bar) + 2, row, percent, theme.fg, bg)
@@ -1595,12 +1607,27 @@ class App:
         put_str(mid(extra), y + 2, extra, theme.muted, bg)
         y += 4
 
+        binds = (
+            ("enter", "start", "q", "quit"),
+            ("↑ ↓", "mode", "← →", "look"),
+            ("[ ]", "game vol", "- =", "music vol"),
+            ("t", "music", "n", "landing"),
+            ("m", "mute", "i / u", "bar icon"),
+        )
+        bind_w = 0
+        formatted: list[str] = []
+        for k1, a1, k2, a2 in binds:
+            line = f"{k1:<5}  {a1:<10}   {k2:<5}  {a2:<10}"
+            formatted.append(line)
+            bind_w = max(bind_w, len(line))
+        bind_x = mid(" " * bind_w)
         if time.monotonic() < self.bar_note_until and self.bar_note:
             put_str(mid(self.bar_note), y, self.bar_note[:card_w], theme.accent, bg)
-        else:
-            bar_line = "i  bar off     u  bar on"
-            put_str(mid(bar_line), y, bar_line, theme.muted, bg)
-        y += 2
+            y += 2
+        for line in formatted:
+            put_str(bind_x, y, line, theme.muted, bg)
+            y += 1
+        y += 1
 
         heading = f"board  ·  {MODE_LABEL[selected_mode]}"
         put_str(mid(heading), y, heading, theme.muted, bg)
@@ -1614,9 +1641,6 @@ class App:
         else:
             empty = "no games yet"
             put_str(mid(empty), y, empty, theme.muted, bg)
-
-        hint = "enter  start     q  quit"
-        put_str(mid(hint), min(rows - 1, y + board_h + 2), hint, theme.muted, bg)
         return self.paint_canvas(canvas)
 
     def draw_play(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:

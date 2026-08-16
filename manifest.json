@@ -21,6 +21,6 @@
       "game"
     ],
     "allowMultiple": false,
-    "defaultSection": "left"
+    "defaultSection": "center"
   }
 }

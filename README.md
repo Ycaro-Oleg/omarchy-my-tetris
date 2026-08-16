@@ -57,8 +57,7 @@ That license lets this free plugin share and loop the recordings if the credit s
 ## Configure
 
 ```sh
-omarchy bar put terminal.tetris
-omarchy bar move terminal.tetris --section left
+omarchy bar put terminal.tetris --section center --before omarchy.indicators
 omarchy plugin disable terminal.tetris
 ```
 
