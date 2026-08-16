@@ -378,7 +378,8 @@ class Scores:
 class Settings:
     def __init__(self) -> None:
         self.sound = "thock"
-        self.volume = 55
+        self.sound_volume = 55
+        self.music_volume = 15
         self.theme = "piano"
         self.music_muted = False
         self.mtime = -1.0
@@ -403,11 +404,16 @@ class Settings:
         theme = str(raw.get("theme", "piano"))
         self.theme = theme if theme in MUSIC_THEMES else "piano"
         self.music_muted = bool(raw.get("music_muted", False))
-        try:
-            self.volume = max(0, min(100, int(raw.get("volume", 55))))
-        except (TypeError, ValueError):
-            self.volume = 55
+        legacy = raw.get("volume")
+        self.sound_volume = self._clamp_vol(raw.get("sound_volume", legacy if legacy is not None else 55), 55)
+        self.music_volume = self._clamp_vol(raw.get("music_volume", 15), 15)
         return True
+
+    def _clamp_vol(self, value, fallback: int) -> int:
+        try:
+            return max(0, min(100, int(value)))
+        except (TypeError, ValueError):
+            return fallback
 
     def save(self) -> None:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -416,7 +422,8 @@ class Settings:
             json.dumps(
                 {
                     "sound": self.sound,
-                    "volume": self.volume,
+                    "sound_volume": self.sound_volume,
+                    "music_volume": self.music_volume,
                     "theme": self.theme,
                     "music_muted": self.music_muted,
                 },
@@ -448,10 +455,15 @@ class Settings:
         self.save()
         return self.music_muted
 
-    def nudge_volume(self, delta: int) -> int:
-        self.volume = max(0, min(100, self.volume + delta))
+    def nudge_sound(self, delta: int) -> int:
+        self.sound_volume = max(0, min(100, self.sound_volume + delta))
         self.save()
-        return self.volume
+        return self.sound_volume
+
+    def nudge_music(self, delta: int) -> int:
+        self.music_volume = max(0, min(100, self.music_volume + delta))
+        self.save()
+        return self.music_volume
 
 
 class Sound:
@@ -478,7 +490,7 @@ class Sound:
         return "clear"
 
     def play(self, voice: Optional[str] = None) -> None:
-        if self.player is None or self.settings.volume <= 0:
+        if self.player is None or self.settings.sound_volume <= 0:
             return
         chosen = voice or self.settings.sound
         path = self.path_for(chosen)
@@ -486,9 +498,9 @@ class Sound:
             return
         command = list(self.player)
         if command[0].endswith("pw-play"):
-            command.extend(["--volume", f"{self.settings.volume / 100.0:.2f}"])
+            command.extend(["--volume", f"{self.settings.sound_volume / 100.0:.2f}"])
         elif command[0].endswith("paplay"):
-            command.append(f"--volume={int(self.settings.volume / 100.0 * 65536)}")
+            command.append(f"--volume={int(self.settings.sound_volume / 100.0 * 65536)}")
         command.append(str(path))
         try:
             self.children = [child for child in self.children if child.poll() is None]
@@ -525,9 +537,9 @@ class Music:
         return ROOT / "sounds" / "themes" / f"{theme}.mp3"
 
     def gain(self) -> float:
-        if self.settings.music_muted or self.settings.volume <= 0:
+        if self.settings.music_muted or self.settings.music_volume <= 0:
             return 0.0
-        return max(0.28, min(0.78, 0.22 + self.settings.volume / 100.0 * 0.52))
+        return self.settings.music_volume / 100.0 * 0.22
 
     def start(self) -> None:
         if self.running:
@@ -1175,6 +1187,7 @@ class App:
         self.celebrate_until = 0.0
         self.ember = Ember(CARD_W, 3)
         self.vol_flash_until = 0.0
+        self.vol_flash = "game"
 
     def start_mode(self, mode: str) -> None:
         self.game = Game(mode)
@@ -1254,12 +1267,14 @@ class App:
                     "n": "sound",
                     "t": "theme",
                     "m": "mute",
-                    "[": "vol-",
-                    "]": "vol+",
-                    "-": "vol-",
-                    "_": "vol-",
-                    "=": "vol+",
-                    "+": "vol+",
+                    "[": "sfx-",
+                    "]": "sfx+",
+                    "-": "mus-",
+                    "_": "mus-",
+                    "=": "mus+",
+                    "+": "mus+",
+                    ",": "mus-",
+                    ".": "mus+",
                 }
                 keys.append(names.get(ch, ch))
             i += 1
@@ -1283,13 +1298,23 @@ class App:
                 self.settings.cycle_theme()
             elif key in ("mute", "m"):
                 self.settings.toggle_music()
-            elif key in ("vol-", "[", "-"):
-                self.settings.nudge_volume(-5)
+            elif key in ("sfx-", "["):
+                self.settings.nudge_sound(-5)
                 self.sound.play()
+                self.vol_flash = "game"
                 self.vol_flash_until = time.monotonic() + 1.2
-            elif key in ("vol+", "]", "=", "+"):
-                self.settings.nudge_volume(5)
+            elif key in ("sfx+", "]"):
+                self.settings.nudge_sound(5)
                 self.sound.play()
+                self.vol_flash = "game"
+                self.vol_flash_until = time.monotonic() + 1.2
+            elif key in ("mus-", "-", ","):
+                self.settings.nudge_music(-5)
+                self.vol_flash = "music"
+                self.vol_flash_until = time.monotonic() + 1.2
+            elif key in ("mus+", "=", ".", "+"):
+                self.settings.nudge_music(5)
+                self.vol_flash = "music"
                 self.vol_flash_until = time.monotonic() + 1.2
             elif key in ("quit", "esc", "q"):
                 self.running = False
@@ -1352,11 +1377,21 @@ class App:
                 self.settings.cycle_theme()
             elif key in ("mute", "m"):
                 self.settings.toggle_music()
-            elif key in ("vol-", "[", "-"):
-                self.settings.nudge_volume(-5)
+            elif key in ("sfx-", "["):
+                self.settings.nudge_sound(-5)
+                self.vol_flash = "game"
                 self.vol_flash_until = time.monotonic() + 1.2
-            elif key in ("vol+", "]", "=", "+"):
-                self.settings.nudge_volume(5)
+            elif key in ("sfx+", "]"):
+                self.settings.nudge_sound(5)
+                self.vol_flash = "game"
+                self.vol_flash_until = time.monotonic() + 1.2
+            elif key in ("mus-", "-", ","):
+                self.settings.nudge_music(-5)
+                self.vol_flash = "music"
+                self.vol_flash_until = time.monotonic() + 1.2
+            elif key in ("mus+", "=", ".", "+"):
+                self.settings.nudge_music(5)
+                self.vol_flash = "music"
                 self.vol_flash_until = time.monotonic() + 1.2
             elif key in ("retry", "r"):
                 self.record_if_needed()
@@ -1500,21 +1535,28 @@ class App:
             put_str(left + 4, y + 1, MODE_BLURB[mode][:inner_w], dim, row_bg)
 
         vol_y = box_y + box_h + 1
-        bar = volume_bar(self.settings.volume, 18)
-        percent = "off" if self.settings.volume <= 0 else f"{self.settings.volume}%"
-        vol_label = f"vol  {bar}  {percent}"
-        put_str(left + max(0, (card_w - len(vol_label)) // 2), vol_y, "vol  ", theme.muted, bg)
-        bar_x = left + max(0, (card_w - len(vol_label)) // 2) + 5
-        for i, ch in enumerate(bar):
-            color = theme.accent if ch == "█" else theme.muted
-            put(bar_x + i, vol_y, ch, color, bg)
-        put_str(bar_x + len(bar) + 2, vol_y, percent, theme.fg, bg)
-        music = MUSIC_LABEL.get(self.settings.theme, self.settings.theme)
-        state = "muted" if self.settings.music_muted else "music"
-        extra = f"{self.settings.sound}   {music}   {state}"
-        put_str(left + max(0, (card_w - len(extra)) // 2), vol_y + 1, extra, theme.muted, bg)
 
-        board_y = vol_y + 3
+        def draw_bar(y: int, label: str, value: int) -> None:
+            bar = volume_bar(value, 14)
+            percent = "off" if value <= 0 else f"{value}%"
+            text = f"{label:<5} {bar}  {percent}"
+            x = left + max(0, (card_w - len(text)) // 2)
+            put_str(x, y, f"{label:<5} ", theme.muted, bg)
+            bx = x + 6
+            for i, ch in enumerate(bar):
+                color = theme.accent if ch == "█" else theme.muted
+                put(bx + i, y, ch, color, bg)
+            put_str(bx + len(bar) + 2, y, percent, theme.fg, bg)
+
+        draw_bar(vol_y, "game", self.settings.sound_volume)
+        music_value = 0 if self.settings.music_muted else self.settings.music_volume
+        draw_bar(vol_y + 1, "music", music_value)
+        music = MUSIC_LABEL.get(self.settings.theme, self.settings.theme)
+        state = "muted" if self.settings.music_muted else music
+        extra = f"{self.settings.sound}   {state}"
+        put_str(left + max(0, (card_w - len(extra)) // 2), vol_y + 2, extra, theme.muted, bg)
+
+        board_y = vol_y + 4
         heading = f"board  ·  {MODE_LABEL[selected_mode]}"
         put_str(left + max(0, (card_w - len(heading)) // 2), board_y, heading, theme.muted, bg)
         if board:
@@ -1527,7 +1569,7 @@ class App:
             empty = "no games yet"
             put_str(left + max(0, (card_w - len(empty)) // 2), board_y + 1, empty, theme.muted, bg)
 
-        hint = "enter play   t music theme   m mute   [ ] vol   q quit"
+        hint = "enter   t music theme   m mute   [ ] game   - = music   q"
         put_str(left + max(0, (card_w - len(hint)) // 2), min(rows - 1, board_y + board_h + 2), hint, theme.muted, bg)
         return self.paint_canvas(canvas)
 
@@ -1639,9 +1681,15 @@ class App:
             put_str(left0, well_y + 14, "TIME", theme.muted, bg)
             put_str(left0, well_y + 15, fmt_time(game.clock_ms()), theme.accent, bg)
         if time.monotonic() < self.vol_flash_until:
-            bar = volume_bar(self.settings.volume, 10)
-            percent = "off" if self.settings.volume <= 0 else f"{self.settings.volume}%"
-            put_str(left0, well_y + 17, f"{bar} {percent}", theme.accent, bg)
+            if self.vol_flash == "music":
+                value = 0 if self.settings.music_muted else self.settings.music_volume
+                label = "music"
+            else:
+                value = self.settings.sound_volume
+                label = "game"
+            bar = volume_bar(value, 10)
+            percent = "off" if value <= 0 else f"{value}%"
+            put_str(left0, well_y + 17, f"{label} {bar} {percent}", theme.accent, bg)
         elif game.banner and time.monotonic() < game.banner_until:
             put_str(left0, well_y + 17, game.banner, theme.accent, bg)
 
@@ -1650,7 +1698,7 @@ class App:
             mini(kind, right0, well_y + i * 4)
 
         help_y = min(rows - 1, well_y + ROWS + 1)
-        help_txt = "←→ move   space drop   t music theme   m mute   [ ] vol   p pause"
+        help_txt = "←→ move   space drop   [ ] game   - = music   m mute   p pause"
         put_str(max(0, (cols - len(help_txt)) // 2), help_y, help_txt, theme.muted, bg)
 
         overlay = ""
@@ -1768,7 +1816,7 @@ def main() -> int:
             settings.sound = opts["sound"]
         if opts["volume"] is not None:
             try:
-                settings.volume = max(0, min(100, int(opts["volume"])))
+                settings.sound_volume = max(0, min(100, int(opts["volume"])))
             except ValueError:
                 pass
         Sound(settings).play()

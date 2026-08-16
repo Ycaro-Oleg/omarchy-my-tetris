@@ -20,7 +20,8 @@ Panel {
   readonly property string configPath: Quickshell.env("HOME") + "/.local/state/omarchy/tetris.json"
 
   property string sound: "thock"
-  property int volume: 55
+  property int soundVolume: 55
+  property int musicVolume: 15
   property string theme: "piano"
   property bool musicMuted: false
   readonly property var soundOptions: [
@@ -76,14 +77,19 @@ Panel {
       if (themeOptions[j].value === nextTheme) themeOk = true
     root.theme = themeOk ? nextTheme : "piano"
     root.musicMuted = data.music_muted === true
-    var nextVolume = parseInt(data.volume, 10)
-    root.volume = isFinite(nextVolume) ? Math.max(0, Math.min(100, nextVolume)) : 55
+    var legacy = parseInt(data.volume, 10)
+    var nextSoundVol = parseInt(data.sound_volume, 10)
+    if (!isFinite(nextSoundVol) && isFinite(legacy)) nextSoundVol = legacy
+    root.soundVolume = isFinite(nextSoundVol) ? Math.max(0, Math.min(100, nextSoundVol)) : 55
+    var nextMusicVol = parseInt(data.music_volume, 10)
+    root.musicVolume = isFinite(nextMusicVol) ? Math.max(0, Math.min(100, nextMusicVol)) : 15
   }
 
   function persist() {
     var payload = JSON.stringify({
       sound: root.sound,
-      volume: root.volume,
+      sound_volume: root.soundVolume,
+      music_volume: root.musicVolume,
       theme: root.theme,
       music_muted: root.musicMuted
     }, null, 2) + "\n"
@@ -92,7 +98,7 @@ Panel {
 
   function preview() {
     if (previewProc.running) previewProc.running = false
-    previewProc.command = [root.gamePath, "--preview", "--sound", root.sound, "--volume", String(root.volume)]
+    previewProc.command = [root.gamePath, "--preview", "--sound", root.sound, "--volume", String(root.soundVolume)]
     previewProc.running = true
   }
 
@@ -173,7 +179,7 @@ Panel {
         }
 
         PanelSectionHeader {
-          text: root.volume === 0 ? "Volume  off" : "Volume  " + root.volume + "%"
+          text: root.soundVolume === 0 ? "Game  off" : "Game  " + root.soundVolume + "%"
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
         }
@@ -181,13 +187,13 @@ Panel {
         PanelSlider {
           width: parent.width
           bar: root.bar
-          value: root.volume
+          value: root.soundVolume
           minimum: 0
           maximum: 100
           step: 5
           integer: true
           onReleased: function(next) {
-            root.volume = Math.round(next)
+            root.soundVolume = Math.round(next)
             root.persist()
             root.preview()
           }
@@ -209,6 +215,26 @@ Panel {
           fontFamily: root.contentFontFamily
           onChanged: function(next) {
             root.theme = next
+            root.persist()
+          }
+        }
+
+        PanelSectionHeader {
+          text: root.musicMuted || root.musicVolume === 0 ? "Music level  off" : "Music level  " + root.musicVolume + "%"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+        }
+
+        PanelSlider {
+          width: parent.width
+          bar: root.bar
+          value: root.musicVolume
+          minimum: 0
+          maximum: 100
+          step: 5
+          integer: true
+          onReleased: function(next) {
+            root.musicVolume = Math.round(next)
             root.persist()
           }
         }
