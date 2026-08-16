@@ -203,7 +203,7 @@ class Theme:
 
     @property
     def grout(self) -> tuple[int, int, int]:
-        return mix((0, 0, 0), self.well, 0.78)
+        return mix((0, 0, 0), self.well, 0.88)
 
     @property
     def fg(self) -> tuple[int, int, int]:
@@ -1509,14 +1509,9 @@ class App:
                 put(x + 1, y, " ", theme.fg, color)
                 return
             seam = theme.grout
-            if ghost:
-                dust = mix(color, theme.well, 0.3)
-                put(x, y, "▇", dust, theme.well)
-                put(x + 1, y, "▉", dust, theme.well)
-                return
-            face = mix((255, 255, 255), color, 0.14)
-            put(x, y, "▇", face, seam)
-            put(x + 1, y, "▉", color, seam)
+            face = mix(color, theme.well, 0.22) if ghost else color
+            put(x, y, "▄", face, seam)
+            put(x + 1, y, " ", theme.fg, seam)
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)
