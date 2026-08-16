@@ -258,18 +258,14 @@ def paint_mino(
         put(x + 1, y, " ", theme.fg, face)
         return
     if style == "brick":
-        # One tile for every mino: colour column + grout column.
-        # A thin line under the colour is the bottom seam, so a T is
-        # four identical blocks with no per-piece special case.
         if ghost:
             dust = mix(color, theme.well, 0.28)
-            put(x, y, "▁", theme.grout, dust)
-            put(x + 1, y, " ", theme.fg, theme.well)
+            put(x, y, "▒", dust, theme.well)
+            put(x + 1, y, "▒", dust, theme.well)
             return
         face = mix((255, 255, 255), color, 0.16)
-        line = mix((0, 0, 0), theme.grout, 0.8)
-        put(x, y, "▁", line, face)
-        put(x + 1, y, " ", theme.fg, theme.grout)
+        put(x, y, "█", face, theme.grout)
+        put(x + 1, y, "▌", color, theme.grout)
         return
     if style == "blocks":
         face = mix(color, theme.well, 0.35) if ghost else color
