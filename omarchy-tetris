@@ -38,6 +38,36 @@ LOOKS = ("nes", "flat", "brick", "blocks")
 LOOK_LABEL = {"nes": "NES", "flat": "flat", "brick": "brick", "blocks": "blocks"}
 CARD_W = 46
 BOARD_ROWS = 4
+MENU_BINDS = (
+    ("enter", "start the selected mode"),
+    ("↑ ↓", "change mode"),
+    ("← →", "cycle look"),
+    ("i", "remove icon from the bar"),
+    ("u", "put icon on the bar"),
+    ("t", "next music theme"),
+    ("n", "next landing sound"),
+    ("m", "mute music"),
+    ("[ ]", "game volume"),
+    ("- =", "music volume"),
+    ("q", "quit"),
+)
+PLAY_BINDS = (
+    ("← →", "move"),
+    ("↑ / x", "rotate"),
+    ("z", "rotate the other way"),
+    ("↓", "soft drop"),
+    ("space", "hard drop"),
+    ("c", "hold"),
+    ("b", "cycle look"),
+    ("n", "next landing sound"),
+    ("t", "next music theme"),
+    ("m", "mute music"),
+    ("[ ]", "game volume"),
+    ("- =", "music volume"),
+    ("p", "pause"),
+    ("r", "retry"),
+    ("q", "back to menu"),
+)
 
 FALLBACK = {
     "mode": "dark",
@@ -1179,6 +1209,9 @@ class App:
         self.vol_flash = "game"
         self.bar_note = ""
         self.bar_note_until = 0.0
+        self.mouse: Optional[tuple[int, int]] = None
+        self.keys_box: Optional[tuple[int, int, int, int]] = None
+        self.keys_pinned = False
 
     def start_mode(self, mode: str) -> None:
         self.game = Game(mode)
@@ -1202,12 +1235,22 @@ class App:
             self.celebrate_mode = game.mode
             self.celebrate_until = time.monotonic() + 8.0
 
+    def keys_open(self) -> bool:
+        return self.keys_pinned or self.hit_keys_chip()
+
+    def hit_keys_chip(self) -> bool:
+        if self.mouse is None or self.keys_box is None:
+            return False
+        x, y = self.mouse
+        x0, y0, x1, y1 = self.keys_box
+        return x0 <= x <= x1 and y0 <= y <= y1
+
     def read_keys(self, timeout: float) -> list[str]:
         keys: list[str] = []
         ready, _, _ = select.select([sys.stdin], [], [], timeout)
         if ready:
             try:
-                chunk = os.read(sys.stdin.fileno(), 64)
+                chunk = os.read(sys.stdin.fileno(), 256)
             except OSError:
                 chunk = b""
             self.buf.extend(chunk)
@@ -1217,12 +1260,38 @@ class App:
         while i < len(data):
             b = data[i]
             if b == 0x1B:
+                if i + 1 >= len(data):
+                    self.buf.extend(data[i:])
+                    break
+                if data[i + 1] == ord("[") and i + 2 < len(data) and data[i + 2] == ord("<"):
+                    j = i + 3
+                    while j < len(data) and data[j] not in (ord("M"), ord("m")):
+                        j += 1
+                    if j >= len(data):
+                        self.buf.extend(data[i:])
+                        break
+                    body = data[i + 3 : j].decode("ascii", "replace")
+                    parts = body.split(";")
+                    if len(parts) == 3:
+                        try:
+                            btn, mx, my = (int(parts[0]), int(parts[1]), int(parts[2]))
+                        except ValueError:
+                            btn, mx, my = -1, 0, 0
+                        if mx > 0 and my > 0:
+                            self.mouse = (mx - 1, my - 1)
+                        if data[j] == ord("M") and btn == 0:
+                            keys.append("click")
+                    i = j + 1
+                    continue
                 if i + 2 < len(data) and data[i + 1] == ord("["):
                     code = data[i + 2]
-                    mapping = {ord("A"): "up", ord("B"): "down", ord("C"): "right", ord("D"): "left"}
-                    keys.append(mapping.get(code, "esc"))
-                    i += 3
-                    continue
+                    if 0x40 <= code <= 0x7E:
+                        mapping = {ord("A"): "up", ord("B"): "down", ord("C"): "right", ord("D"): "left"}
+                        keys.append(mapping.get(code, "esc"))
+                        i += 3
+                        continue
+                    self.buf.extend(data[i:])
+                    break
                 if i + 1 == len(data):
                     keys.append("esc")
                     i += 1
@@ -1276,6 +1345,12 @@ class App:
 
     def handle_menu(self, keys: list[str]) -> None:
         for key in keys:
+            if key == "click":
+                if self.hit_keys_chip():
+                    self.keys_pinned = not self.keys_pinned
+                else:
+                    self.keys_pinned = False
+                continue
             if key in ("up", "k"):
                 self.menu_index = (self.menu_index - 1) % len(MODES)
             elif key in ("down", "j"):
@@ -1317,7 +1392,10 @@ class App:
                 self.vol_flash = "music"
                 self.vol_flash_until = time.monotonic() + 1.2
             elif key in ("quit", "esc", "q"):
-                self.running = False
+                if self.keys_pinned:
+                    self.keys_pinned = False
+                else:
+                    self.running = False
 
     def handle_play(self, keys: list[str]) -> None:
         game = self.game
@@ -1325,6 +1403,12 @@ class App:
             return
         if not game.alive:
             for key in keys:
+                if key == "click":
+                    if self.hit_keys_chip():
+                        self.keys_pinned = not self.keys_pinned
+                    else:
+                        self.keys_pinned = False
+                    continue
                 if key in ("enter", "retry", "r", "space"):
                     if not game.saved:
                         self.record_score()
@@ -1339,7 +1423,16 @@ class App:
                     return
             return
         for key in keys:
+            if key == "click":
+                if self.hit_keys_chip():
+                    self.keys_pinned = not self.keys_pinned
+                else:
+                    self.keys_pinned = False
+                continue
             if key in ("pause", "p", "esc"):
+                if self.keys_pinned:
+                    self.keys_pinned = False
+                    continue
                 game.toggle_pause()
                 continue
             if game.paused:
@@ -1440,7 +1533,61 @@ class App:
                 game.saved = True
 
     def min_size(self) -> tuple[int, int]:
-        return (64, 32) if self.page == "menu" else (56, 24)
+        return (64, 28) if self.page == "menu" else (56, 24)
+
+    def draw_keys_chip(
+        self,
+        put,
+        put_str,
+        fill,
+        cx: int,
+        cy: int,
+        theme: Theme,
+        page_bg: tuple[int, int, int],
+    ) -> None:
+        label = " keybind "
+        box_w = len(label) + 2
+        x = max(0, cx - box_w // 2)
+        hot = self.keys_open()
+        face = mix(theme.selection, page_bg, 0.35) if hot else theme.well
+        ink = theme.accent if hot else theme.muted
+        put_str(x, cy, "╭" + "─" * (box_w - 2) + "╮", ink, face)
+        put_str(x, cy + 1, "│", ink, face)
+        fill(x + 1, cy + 1, box_w - 2, ink, face)
+        put_str(x + 1, cy + 1, label, ink, face)
+        put(x + box_w - 1, cy + 1, "│", ink, face)
+        put_str(x, cy + 2, "╰" + "─" * (box_w - 2) + "╯", ink, face)
+        self.keys_box = (x, cy, x + box_w - 1, cy + 2)
+
+    def draw_keys_card(
+        self,
+        put,
+        put_str,
+        fill,
+        cols: int,
+        rows: int,
+        theme: Theme,
+        binds: tuple[tuple[str, str], ...],
+    ) -> None:
+        key_w = max(len(key) for key, _ in binds)
+        line_w = key_w + 3 + max(len(what) for _, what in binds)
+        box_w = min(cols - 2, line_w + 4)
+        box_h = min(rows - 2, len(binds) + 4)
+        ox = max(0, (cols - box_w) // 2)
+        oy = max(0, (rows - box_h) // 2)
+        panel = mix(theme.rgb("darker_background"), theme.selection, 0.5)
+        for yy in range(box_h):
+            fill(ox, oy + yy, box_w, theme.fg, panel)
+        put_str(ox, oy, "╭" + "─" * (box_w - 2) + "╮", theme.accent, panel)
+        for yy in range(1, box_h - 1):
+            put(ox, oy + yy, "│", theme.accent, panel)
+            put(ox + box_w - 1, oy + yy, "│", theme.accent, panel)
+        put_str(ox, oy + box_h - 1, "╰" + "─" * (box_w - 2) + "╯", theme.accent, panel)
+        title = "keybind"
+        put_str(ox + (box_w - len(title)) // 2, oy + 1, title, theme.accent, panel)
+        for i, (key, what) in enumerate(binds[: box_h - 4]):
+            row = f"{key:<{key_w}}   {what}"
+            put_str(ox + 2, oy + 3 + i, row[: box_w - 4], theme.fg, panel)
 
     def celebrating(self, mode: str) -> bool:
         return self.celebrate_mode == mode and time.monotonic() < self.celebrate_until
@@ -1509,7 +1656,7 @@ class App:
         selected_mode = MODES[self.menu_index]
         board = self.scores.rows(selected_mode)
         board_h = max(1, len(board))
-        height = 25 + board_h
+        height = 24 + board_h
         top = max(1, (rows - height) // 2)
         canvas = [[(" ", theme.fg, bg) for _ in range(cols)] for _ in range(rows)]
 
@@ -1584,8 +1731,15 @@ class App:
 
         look = self.settings.look if self.settings.look in LOOKS else "nes"
         look_y = vol_y + 4
-        put_str(left + 2, look_y, "look  ", theme.muted, bg)
-        put_str(left + 8, look_y, f"◂ {LOOK_LABEL[look]} ▸", theme.accent, bg)
+        look_txt = f"look  ◂ {LOOK_LABEL[look]} ▸"
+        put_str(left + max(0, (card_w - len(look_txt)) // 2), look_y, "look  ", theme.muted, bg)
+        put_str(
+            left + max(0, (card_w - len(look_txt)) // 2) + 6,
+            look_y,
+            f"◂ {LOOK_LABEL[look]} ▸",
+            theme.accent,
+            bg,
+        )
         blocks = SHAPES["T"][0]
         minx = min(b[0] for b in blocks)
         miny = min(b[1] for b in blocks)
@@ -1609,13 +1763,12 @@ class App:
             for i, kind in enumerate("IOTSZJL"):
                 paint_mino(put, theme, look, strip_x + i * CELL, strip_y, theme.piece(kind))
 
+        chip_y = look_y + 3
+        self.draw_keys_chip(put, put_str, fill, left + card_w // 2, chip_y, theme, bg)
         if time.monotonic() < self.bar_note_until and self.bar_note:
-            put_str(left + 2, look_y + 2, self.bar_note[: card_w - 4], theme.accent, bg)
-        else:
-            put_str(left + 2, look_y + 2, "i   remove the Tetris icon from the bar", theme.accent, bg)
-            put_str(left + 2, look_y + 3, "u   put the Tetris icon on the bar", theme.muted, bg)
+            put_str(left + max(0, (card_w - len(self.bar_note)) // 2), chip_y + 3, self.bar_note[:card_w], theme.accent, bg)
 
-        board_y = look_y + 5
+        board_y = chip_y + 5
         heading = f"board  ·  {MODE_LABEL[selected_mode]}"
         put_str(left + max(0, (card_w - len(heading)) // 2), board_y, heading, theme.muted, bg)
         if board:
@@ -1628,8 +1781,8 @@ class App:
             empty = "no games yet"
             put_str(left + max(0, (card_w - len(empty)) // 2), board_y + 1, empty, theme.muted, bg)
 
-        hint = "enter   ←→ look   i bar off   u bar on   t music   m mute   q"
-        put_str(left + max(0, (card_w - len(hint)) // 2), min(rows - 1, board_y + board_h + 2), hint, theme.muted, bg)
+        if self.keys_open():
+            self.draw_keys_card(put, put_str, fill, cols, rows, theme, MENU_BINDS)
         return self.paint_canvas(canvas)
 
     def draw_play(self, cols: int, rows: int, bg: tuple[int, int, int]) -> list[str]:
@@ -1747,9 +1900,8 @@ class App:
         for i, kind in enumerate(game.next):
             mini(kind, right0, well_y + i * 4)
 
-        help_y = min(rows - 1, well_y + ROWS + 1)
-        help_txt = "←→ move   space drop   b look   [ ] game   - = music   m mute   p pause"
-        put_str(max(0, (cols - len(help_txt)) // 2), help_y, help_txt, theme.muted, bg)
+        help_y = min(rows - 3, well_y + ROWS + 1)
+        self.draw_keys_chip(put, put_str, fill, cols // 2, help_y, theme, bg)
 
         overlay = ""
         record = self.celebrating(game.mode)
@@ -1779,16 +1931,18 @@ class App:
             put_str(ox + (box_w - len(title)) // 2, oy + 1, title, theme.accent, panel)
             put_str(ox + (box_w - len(sub)) // 2, oy + 3, sub, theme.fg, panel)
 
+        if self.keys_open():
+            self.draw_keys_card(put, put_str, fill, cols, rows, theme, PLAY_BINDS)
         return self.paint_canvas(canvas)
 
     def setup_term(self) -> None:
         self.old_term = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
-        sys.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?7l\x1b]0;Tetris\x07")
+        sys.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1003h\x1b[?1006h\x1b]0;Tetris\x07")
         sys.stdout.flush()
 
     def restore_term(self) -> None:
-        sys.stdout.write("\x1b[?7h\x1b[?25h\x1b[?1049l")
+        sys.stdout.write("\x1b[?1006l\x1b[?1003l\x1b[?1000l\x1b[?7h\x1b[?25h\x1b[?1049l")
         sys.stdout.flush()
         if self.old_term is not None:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_term)
@@ -1826,12 +1980,12 @@ class App:
                     if not self.game.alive and not self.game.saved:
                         self.record_score()
                         self.game.saved = True
-                self.draw()
                 keys = self.read_keys(TICK)
                 if self.page == "menu":
                     self.handle_menu(keys)
                 else:
                     self.handle_play(keys)
+                self.draw()
         finally:
             self.music.stop()
             self.restore_term()

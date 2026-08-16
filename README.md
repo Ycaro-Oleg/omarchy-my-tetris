@@ -28,7 +28,9 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 
 | Key | Action |
 |---|---|
-| ← → | Move |
+Hover the **keybind** box (or click it) for the full list. On the menu, `i` takes the icon off the bar and `u` puts it back.
+
+| ← → | Move (look on the menu) |
 | ↑ / x | Rotate |
 | z | Rotate the other way |
 | ↓ | Soft drop |
@@ -36,7 +38,7 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | c | Hold |
 | n | Next landing sound |
 | t | Next music theme |
-| b / ← → | Next mino look (arrows on the menu) |
+| b | Next mino look |
 | i | Remove the Tetris icon from the bar |
 | u | Put the Tetris icon on the bar |
 | m | Mute music only |
