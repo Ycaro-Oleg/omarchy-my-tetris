@@ -246,7 +246,6 @@ def paint_mino(
     color: tuple[int, int, int],
     ghost: bool = False,
     filled: bool = True,
-    seam_bottom: bool = False,
 ) -> None:
     if not filled:
         put(x, y, " ", theme.fg, color)
@@ -259,23 +258,18 @@ def paint_mino(
         put(x + 1, y, " ", theme.fg, face)
         return
     if style == "brick":
+        # One tile for every mino: colour column + grout column.
+        # A thin line under the colour is the bottom seam, so a T is
+        # four identical blocks with no per-piece special case.
         if ghost:
             dust = mix(color, theme.well, 0.28)
-            if seam_bottom:
-                put(x, y, "▁", theme.grout, dust)
-                put(x + 1, y, "▘", dust, theme.grout)
-            else:
-                put(x, y, "▒", dust, theme.well)
-                put(x + 1, y, "▒", dust, theme.well)
+            put(x, y, "▁", theme.grout, dust)
+            put(x + 1, y, " ", theme.fg, theme.well)
             return
         face = mix((255, 255, 255), color, 0.16)
-        if seam_bottom:
-            line = mix((0, 0, 0), theme.grout, 0.8)
-            put(x, y, "▁", line, face)
-            put(x + 1, y, "▘", color, line)
-        else:
-            put(x, y, "█", face, theme.grout)
-            put(x + 1, y, "▌", color, theme.grout)
+        line = mix((0, 0, 0), theme.grout, 0.8)
+        put(x, y, "▁", line, face)
+        put(x + 1, y, " ", theme.fg, theme.grout)
         return
     if style == "blocks":
         face = mix(color, theme.well, 0.35) if ghost else color
@@ -301,10 +295,6 @@ def gravity_ms(level: int) -> int:
 
 def cells(kind: str, rot: int, x: int, y: int) -> list[tuple[int, int]]:
     return [(x + cx, y + cy) for cx, cy in SHAPES[kind][rot % 4]]
-
-
-def has_mino_below(offsets: set[tuple[int, int]], cx: int, cy: int) -> bool:
-    return (cx, cy + 1) in offsets
 
 
 class Bag:
@@ -335,13 +325,10 @@ class Piece:
     def blocks(self) -> list[tuple[int, int]]:
         return cells(self.kind, self.rot, self.x, self.y)
 
-    def tiles(self) -> list[tuple[int, int, int, int]]:
-        return [(self.x + cx, self.y + cy, cx, cy) for cx, cy in SHAPES[self.kind][self.rot % 4]]
-
 
 class Board:
     def __init__(self) -> None:
-        self.grid: list[list[Optional[tuple[str, int, int]]]] = [[None] * COLS for _ in range(HIDDEN + ROWS)]
+        self.grid: list[list[Optional[str]]] = [[None] * COLS for _ in range(HIDDEN + ROWS)]
 
     def _row(self, y: int) -> int:
         return y + HIDDEN
@@ -358,18 +345,14 @@ class Board:
         return all(self.free(x, y) for x, y in piece.blocks())
 
     def lock(self, piece: Piece) -> None:
-        for x, y, cx, cy in piece.tiles():
+        for x, y in piece.blocks():
             if self.inside(x, y):
-                self.grid[self._row(y)][x] = (piece.kind, cx, cy)
+                self.grid[self._row(y)][x] = piece.kind
 
-    def tile(self, x: int, y: int) -> Optional[tuple[str, int, int]]:
+    def cell(self, x: int, y: int) -> Optional[str]:
         if not (0 <= x < COLS and 0 <= y < ROWS):
             return None
         return self.grid[self._row(y)][x]
-
-    def cell(self, x: int, y: int) -> Optional[str]:
-        item = self.tile(x, y)
-        return item[0] if item else None
 
     def full_rows(self) -> list[int]:
         return [
@@ -1585,7 +1568,6 @@ class App:
         sx = left + card_w - 2 - preview_w
         for row in range(2):
             fill(sx - 1, look_y + row, preview_w + 2, theme.fg, well)
-        preview_offsets = set(blocks)
         for cx, cy in blocks:
             paint_mino(
                 put,
@@ -1594,7 +1576,6 @@ class App:
                 sx + (cx - minx) * CELL,
                 look_y + (cy - miny),
                 theme.piece("T"),
-                seam_bottom=has_mino_below(preview_offsets, cx, cy),
             )
         strip_x = left + 2
         strip_y = look_y + 1
@@ -1644,15 +1625,8 @@ class App:
 
         look = self.settings.look if self.settings.look in LOOKS else "nes"
 
-        def put_cell(
-            x: int,
-            y: int,
-            color: tuple[int, int, int],
-            ghost: bool = False,
-            filled: bool = True,
-            seam_bottom: bool = False,
-        ) -> None:
-            paint_mino(put, theme, look, x, y, color, ghost=ghost, filled=filled, seam_bottom=seam_bottom)
+        def put_cell(x: int, y: int, color: tuple[int, int, int], ghost: bool = False, filled: bool = True) -> None:
+            paint_mino(put, theme, look, x, y, color, ghost=ghost, filled=filled)
 
         title = f"TETRIS  ·  {MODE_LABEL[game.mode]}"
         put_str(well0, header_y, title, theme.accent, bg)
@@ -1668,38 +1642,22 @@ class App:
 
         for y in range(ROWS):
             for x in range(COLS):
-                tile = game.board.tile(x, y)
-                if tile:
-                    kind, lx, ly = tile
+                kind = game.board.cell(x, y)
+                if kind:
                     color = theme.piece(kind)
                     if y in game.clearing:
                         color = mix(theme.rgb("bright_foreground"), color, 0.75)
-                    below = game.board.tile(x, y + 1)
-                    seam = bool(below) and below[0] == kind and below[1] == lx and below[2] == ly + 1
-                    put_cell(well0 + 1 + x * CELL, well_y + y, color, seam_bottom=seam)
+                    put_cell(well0 + 1 + x * CELL, well_y + y, color)
 
         if game.piece and game.alive and not game.paused:
             ghost = game.ghost()
             if ghost:
-                ghost_offsets = {(cx, cy) for _, _, cx, cy in ghost.tiles()}
-                for x, y, cx, cy in ghost.tiles():
+                for x, y in ghost.blocks():
                     if 0 <= y < ROWS:
-                        put_cell(
-                            well0 + 1 + x * CELL,
-                            well_y + y,
-                            theme.piece(game.piece.kind),
-                            ghost=True,
-                            seam_bottom=has_mino_below(ghost_offsets, cx, cy),
-                        )
-            piece_offsets = {(cx, cy) for _, _, cx, cy in game.piece.tiles()}
-            for x, y, cx, cy in game.piece.tiles():
+                        put_cell(well0 + 1 + x * CELL, well_y + y, theme.piece(game.piece.kind), ghost=True)
+            for x, y in game.piece.blocks():
                 if 0 <= y < ROWS:
-                    put_cell(
-                        well0 + 1 + x * CELL,
-                        well_y + y,
-                        theme.piece(game.piece.kind),
-                        seam_bottom=has_mino_below(piece_offsets, cx, cy),
-                    )
+                    put_cell(well0 + 1 + x * CELL, well_y + y, theme.piece(game.piece.kind))
 
         def mini(kind: Optional[str], ox: int, oy: int) -> None:
             box_w = 12
@@ -1720,14 +1678,8 @@ class App:
             ph = maxy - miny + 1
             sx = ox + 1 + max(0, (box_w - 2 - pw) // 2)
             sy = oy + 1 + max(0, (2 - ph) // 2)
-            offsets = set(blocks)
             for cx, cy in blocks:
-                put_cell(
-                    sx + (cx - minx) * CELL,
-                    sy + (cy - miny),
-                    theme.piece(kind),
-                    seam_bottom=has_mino_below(offsets, cx, cy),
-                )
+                put_cell(sx + (cx - minx) * CELL, sy + (cy - miny), theme.piece(kind))
 
         put_str(left0, well_y - 1, "HOLD", theme.muted, bg)
         mini(game.hold, left0, well_y)
