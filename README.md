@@ -49,7 +49,7 @@ Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use
 
 The three themes are *Tetris Theme – Korobeiniki – Rearranged* by [Gregor Quendel](https://www.gregorquendel.com), from [ClassicalS.de](https://www.classicals.de/tetris-theme). © 2024 Gregor Quendel. Licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
 
-That license lets this free plugin share and loop the recordings if the credit stays with them. It does **not** allow selling the plugin or putting the tracks in a paid product. For that, buy a [commercial license](https://www.classicals.de/). The plugin only trims silence and crossfades the loop point; see `sounds/themes/NOTICE.md`.
+That license lets this free plugin share and loop the recordings if the credit stays with them. It does **not** allow selling the plugin or putting the tracks in a paid product. For that, buy a [commercial license](https://www.classicals.de/). The plugin uses a short Opus loop from each recording, then trims silence and crossfades the join; see `sounds/themes/NOTICE.md`.
 
 ## Configure
 
