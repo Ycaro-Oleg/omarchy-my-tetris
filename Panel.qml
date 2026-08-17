@@ -25,6 +25,7 @@ Panel {
   property int musicVolume: 15
   property string theme: "piano"
   property string look: "nes"
+  property bool ghost: true
   property bool musicMuted: false
   readonly property var soundOptions: [
     { value: "thock", label: "Thock" },
@@ -96,6 +97,7 @@ Panel {
     for (var k = 0; k < lookOptions.length; k++)
       if (lookOptions[k].value === nextLook) lookOk = true
     root.look = lookOk ? nextLook : "nes"
+    root.ghost = data.ghost !== false
     root.musicMuted = data.music_muted === true
     var legacy = parseInt(data.volume, 10)
     var nextSoundVol = parseInt(data.sound_volume, 10)
@@ -112,6 +114,7 @@ Panel {
       music_volume: root.musicVolume,
       theme: root.theme,
       look: root.look,
+      ghost: root.ghost,
       music_muted: root.musicMuted
     }, null, 2) + "\n"
     configFile.setText(payload)
@@ -150,7 +153,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(320))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(560))
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(680))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -231,6 +234,19 @@ Panel {
           fontFamily: root.contentFontFamily
           onChanged: function(next) {
             root.look = next
+            root.persist()
+          }
+        }
+
+        Toggle {
+          width: parent.width
+          label: "Ghost piece"
+          description: "Shows where the piece will land"
+          checked: root.ghost
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: {
+            root.ghost = !root.ghost
             root.persist()
           }
         }
