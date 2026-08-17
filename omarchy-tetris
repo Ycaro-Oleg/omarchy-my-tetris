@@ -441,6 +441,7 @@ class Settings:
         self.theme = "piano"
         self.look = "nes"
         self.music_muted = False
+        self.ghost = True
         self.mtime = -1.0
         self.load()
 
@@ -465,6 +466,7 @@ class Settings:
         look = str(raw.get("look", "nes"))
         self.look = look if look in LOOKS else "nes"
         self.music_muted = bool(raw.get("music_muted", False))
+        self.ghost = bool(raw.get("ghost", True))
         legacy = raw.get("volume")
         self.sound_volume = self._clamp_vol(raw.get("sound_volume", legacy if legacy is not None else 55), 55)
         self.music_volume = self._clamp_vol(raw.get("music_volume", 15), 15)
@@ -488,6 +490,7 @@ class Settings:
                     "theme": self.theme,
                     "look": self.look,
                     "music_muted": self.music_muted,
+                    "ghost": self.ghost,
                 },
                 indent=2,
             )
@@ -522,6 +525,11 @@ class Settings:
         self.music_muted = not self.music_muted
         self.save()
         return self.music_muted
+
+    def toggle_ghost(self) -> bool:
+        self.ghost = not self.ghost
+        self.save()
+        return self.ghost
 
     def nudge_sound(self, delta: int) -> int:
         self.sound_volume = max(0, min(100, self.sound_volume + delta))
@@ -1258,6 +1266,7 @@ class App:
                     "n": "sound",
                     "t": "theme",
                     "b": "look",
+                    "g": "ghost",
                     "i": "baroff",
                     "u": "baron",
                     "m": "mute",
@@ -1292,6 +1301,8 @@ class App:
                 self.settings.cycle_theme()
             elif key in ("look", "b", "left", "right"):
                 self.settings.cycle_look(-1 if key == "left" else 1)
+            elif key in ("ghost", "g"):
+                self.settings.toggle_ghost()
             elif key in ("baroff", "i"):
                 self.set_bar_icon(False)
             elif key in ("baron", "u"):
@@ -1347,6 +1358,8 @@ class App:
                     self.settings.cycle_theme()
                 elif key in ("look", "b"):
                     self.settings.cycle_look()
+                elif key in ("ghost", "g"):
+                    self.settings.toggle_ghost()
                 elif key in ("mute", "m"):
                     self.settings.toggle_music()
                 elif key in ("quit", "q"):
@@ -1379,6 +1392,8 @@ class App:
                 self.settings.cycle_theme()
             elif key in ("look", "b"):
                 self.settings.cycle_look()
+            elif key in ("ghost", "g"):
+                self.settings.toggle_ghost()
             elif key in ("mute", "m"):
                 self.settings.toggle_music()
             elif key in ("sfx-", "["):
@@ -1628,6 +1643,9 @@ class App:
             put_str(left + 2, look_y + 2, "i   remove the Tetris icon from the bar", theme.accent, bg)
             put_str(left + 2, look_y + 3, "u   put the Tetris icon on the bar", theme.muted, bg)
 
+        put_str(left + 2, look_y + 4, "ghost ", theme.muted, bg)
+        put_str(left + 8, look_y + 4, "on" if self.settings.ghost else "off", theme.accent, bg)
+
         board_y = look_y + 5
         heading = f"board  ·  {MODE_LABEL[selected_mode]}"
         put_str(left + max(0, (card_w - len(heading)) // 2), board_y, heading, theme.muted, bg)
@@ -1641,7 +1659,7 @@ class App:
             empty = "no games yet"
             put_str(left + max(0, (card_w - len(empty)) // 2), board_y + 1, empty, theme.muted, bg)
 
-        hint = "enter   ←→ look   i bar off   u bar on   t music   m mute   q"
+        hint = "enter   ←→ look   g ghost   t music   m mute   q"
         put_str(left + max(0, (card_w - len(hint)) // 2), min(rows - 1, board_y + board_h + 2), hint, theme.muted, bg)
         return self.paint_canvas(canvas)
 
@@ -1696,7 +1714,7 @@ class App:
                     put_cell(well0 + 1 + x * CELL, well_y + y, color)
 
         if game.piece and game.alive and not game.paused:
-            ghost = game.ghost()
+            ghost = game.ghost() if self.settings.ghost else None
             if ghost:
                 for x, y in ghost.blocks():
                     if 0 <= y < ROWS:
@@ -1762,7 +1780,7 @@ class App:
             mini(kind, right0, well_y + i * 4)
 
         help_y = min(rows - 1, well_y + ROWS + 1)
-        help_txt = "←→ move   space drop   b look   [ ] game   - = music   m mute   p pause"
+        help_txt = "←→ move  space drop  b look  g ghost  [ ] game  - = music  m mute  p pause"
         put_str(max(0, (cols - len(help_txt)) // 2), help_y, help_txt, theme.muted, bg)
 
         overlay = ""

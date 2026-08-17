@@ -42,6 +42,7 @@ On the **menu**:
 | ↑ ↓ | Change mode |
 | enter / space | Start the selected mode |
 | ← → | Cycle look (NES, flat, brick, blocks) |
+| g | Ghost piece on or off |
 | [ ] | Game volume |
 | - = | Music volume |
 | t | Next music theme |
@@ -62,6 +63,7 @@ In a **game**:
 | space | Hard drop |
 | c | Hold |
 | b | Cycle look |
+| g | Ghost piece on or off |
 | n | Next landing sound |
 | t | Next music theme |
 | m | Mute music only |
@@ -97,7 +99,7 @@ Left click the bar icon for the panel. Right click starts a game. Escape closes 
 | **Sprint** | Clear 40 lines. Fastest time wins |
 | **Ultra** | Two minutes. Highest score wins |
 
-Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use a chime that rises with 2–7 lines. Music themes are **piano**, **strings**, and **music box**. Mino looks are **NES**, **flat**, **brick**, and **blocks**. Mute music from the panel or with `m`; landing and score sounds stay on. Game volume and music volume are separate. Settings live in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
+Landing voices are **thock**, **click**, **chip**, and **hush**. Line clears use a chime that rises with 2–7 lines. Music themes are **piano**, **strings**, and **music box**. Mino looks are **NES**, **flat**, **brick**, and **blocks**. The ghost piece shows where the falling piece will land. Turn it off in the panel or with `g`. Mute music from the panel or with `m`; landing and score sounds stay on. Game volume and music volume are separate. Settings live in `~/.local/state/omarchy/tetris.json`. The board, with date and time, lives in `~/.local/share/omarchy-tetris/scores.json`. First place sits in an ASCII fire box.
 
 ## Music
 
