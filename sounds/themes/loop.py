@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 import math
+import os
 import struct
 import subprocess
 import sys
 from pathlib import Path
 
 RATE = 44100
-SRC = Path("/home/ycarooleg/Downloads/MusicThemeOmarchy-Tetris")
+SRC = Path(os.environ.get("TETRIS_MUSIC_SOURCE", Path(__file__).resolve().parent / "source"))
 OUT = Path(__file__).resolve().parent
 FADE = int(RATE * 0.045)
 TARGETS = (12.8, 25.6)
@@ -164,6 +165,9 @@ if __name__ == "__main__":
     for name, filename in NAMES.items():
         path = SRC / filename
         if not path.is_file():
-            sys.stderr.write(f"missing {path}\n")
+            sys.stderr.write(
+                f"missing {path}\n"
+                "set TETRIS_MUSIC_SOURCE to the directory holding the source MP3s\n"
+            )
             sys.exit(1)
         build(name, path)
